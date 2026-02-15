@@ -1,0 +1,22 @@
+{
+    "name": "@studymate/auth",
+    "version": "0.0.1",
+    "private": true,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "jsonwebtoken": "^9.0.2",
+        "bcryptjs": "^2.4.3"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/jsonwebtoken": "^9.0.9",
+        "@types/bcryptjs": "^2.4.6",
+        "@types/node": "^22.13.4"
+    }
+}

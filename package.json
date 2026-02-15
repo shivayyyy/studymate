@@ -1,0 +1,24 @@
+{
+    "name": "studymate",
+    "private": true,
+    "scripts": {
+        "build": "turbo run build",
+        "dev": "turbo run dev --concurrency=20",
+        "dev:api": "turbo run dev --filter=@studymate/api",
+        "dev:ws": "turbo run dev --filter=@studymate/websocket",
+        "lint": "turbo run lint",
+        "test": "turbo run test",
+        "clean": "turbo run clean && rm -rf node_modules",
+        "seed": "bun run scripts/seed-db.ts",
+        "create-admin": "bun run scripts/create-admin.ts"
+    },
+    "devDependencies": {
+        "turbo": "^2.4.4",
+        "typescript": "^5.7.3"
+    },
+    "packageManager": "bun@1.2.4",
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ]
+}

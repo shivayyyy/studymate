@@ -1,0 +1,20 @@
+{
+    "name": "@studymate/cache",
+    "version": "0.0.1",
+    "private": true,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@studymate/config": "workspace:*",
+        "redis": "^4.7.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.13.4"
+    }
+}

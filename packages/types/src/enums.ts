@@ -1,0 +1,64 @@
+// ==================== Shared Enums ====================
+
+export enum ExamCategory {
+    JEE = 'JEE',
+    NEET = 'NEET',
+    UPSC = 'UPSC',
+    GATE = 'GATE',
+}
+
+export enum TimerMode {
+    POMODORO_25_5 = 'POMODORO_25_5',
+    EXTENDED_45_10 = 'EXTENDED_45_10',
+    LONG_90_20 = 'LONG_90_20',
+    CUSTOM = 'CUSTOM',
+}
+
+export enum TimerPhase {
+    FOCUS = 'FOCUS',
+    SHORT_BREAK = 'SHORT_BREAK',
+    LONG_BREAK = 'LONG_BREAK',
+}
+
+export enum ContentType {
+    NOTES = 'NOTES',
+    MNEMONICS = 'MNEMONICS',
+    PYQ = 'PYQ',
+    CHEAT_SHEET = 'CHEAT_SHEET',
+    MIND_MAP = 'MIND_MAP',
+    MISTAKE_LOG = 'MISTAKE_LOG',
+}
+
+export enum ContributorBadge {
+    BRONZE = 'BRONZE',
+    SILVER = 'SILVER',
+    GOLD = 'GOLD',
+    PLATINUM = 'PLATINUM',
+}
+
+export enum PresenceStatus {
+    ONLINE = 'ONLINE',
+    IDLE = 'IDLE',
+    OFFLINE = 'OFFLINE',
+}
+
+export enum StorageProvider {
+    S3 = 'S3',
+    CLOUDINARY = 'CLOUDINARY',
+    LOCAL = 'LOCAL',
+}
+
+export enum JobType {
+    SEND_WELCOME_EMAIL = 'SEND_WELCOME_EMAIL',
+    SEND_PASSWORD_RESET = 'SEND_PASSWORD_RESET',
+    SEND_WEEKLY_DIGEST = 'SEND_WEEKLY_DIGEST',
+    SEND_PUSH_NOTIFICATION = 'SEND_PUSH_NOTIFICATION',
+    SEND_STREAK_REMINDER = 'SEND_STREAK_REMINDER',
+    SEND_ACHIEVEMENT_UNLOCKED = 'SEND_ACHIEVEMENT_UNLOCKED',
+    CALCULATE_DAILY_STATS = 'CALCULATE_DAILY_STATS',
+    UPDATE_LEADERBOARD = 'UPDATE_LEADERBOARD',
+    GENERATE_WEEKLY_REPORT = 'GENERATE_WEEKLY_REPORT',
+    GENERATE_THUMBNAIL = 'GENERATE_THUMBNAIL',
+    COMPRESS_IMAGE = 'COMPRESS_IMAGE',
+    SCAN_FOR_MALWARE = 'SCAN_FOR_MALWARE',
+}

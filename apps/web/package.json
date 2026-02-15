@@ -1,0 +1,10 @@
+{
+    "name": "@studymate/web",
+    "version": "0.0.1",
+    "private": true,
+    "scripts": {
+        "dev": "echo 'Web frontend - coming soon'",
+        "build": "echo 'Web frontend - coming soon'",
+        "clean": "rm -rf .next out"
+    }
+}

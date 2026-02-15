@@ -1,0 +1,25 @@
+{
+    "name": "@studymate/websocket",
+    "version": "0.0.1",
+    "private": true,
+    "scripts": {
+        "build": "tsc",
+        "dev": "bun --watch src/index.ts",
+        "start": "bun dist/index.js",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@studymate/types": "workspace:*",
+        "@studymate/config": "workspace:*",
+        "@studymate/auth": "workspace:*",
+        "@studymate/cache": "workspace:*",
+        "@studymate/logger": "workspace:*",
+        "socket.io": "^4.8.1",
+        "@socket.io/redis-adapter": "^8.3.0",
+        "redis": "^4.7.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.13.4"
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "name": "@studymate/storage",
+    "version": "0.0.1",
+    "private": true,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.750.0",
+        "cloudinary": "^2.5.1"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.13.4"
+    }
+}

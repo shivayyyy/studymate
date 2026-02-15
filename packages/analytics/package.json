@@ -1,0 +1,21 @@
+{
+    "name": "@studymate/analytics",
+    "version": "0.0.1",
+    "private": true,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@studymate/types": "workspace:*",
+        "@studymate/database": "workspace:*",
+        "@studymate/cache": "workspace:*"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.13.4"
+    }
+}

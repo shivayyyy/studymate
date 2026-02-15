@@ -1,0 +1,43 @@
+{
+    "name": "@studymate/api",
+    "version": "0.0.1",
+    "private": true,
+    "scripts": {
+        "build": "tsc",
+        "dev": "bun --watch src/index.ts",
+        "start": "bun dist/index.js",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@studymate/types": "workspace:*",
+        "@studymate/config": "workspace:*",
+        "@studymate/validation": "workspace:*",
+        "@studymate/database": "workspace:*",
+        "@studymate/auth": "workspace:*",
+        "@studymate/cache": "workspace:*",
+        "@studymate/storage": "workspace:*",
+        "@studymate/queue": "workspace:*",
+        "@studymate/logger": "workspace:*",
+        "@studymate/analytics": "workspace:*",
+        "@studymate/notifications": "workspace:*",
+        "@studymate/utils": "workspace:*",
+        "express": "^4.21.2",
+        "cors": "^2.8.5",
+        "helmet": "^8.0.0",
+        "express-rate-limit": "^7.5.0",
+        "multer": "^1.4.5-lts.1",
+        "morgan": "^1.10.0",
+        "compression": "^1.7.5",
+        "cookie-parser": "^1.4.7"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/express": "^5.0.0",
+        "@types/cors": "^2.8.17",
+        "@types/morgan": "^1.9.9",
+        "@types/compression": "^1.7.5",
+        "@types/cookie-parser": "^1.4.8",
+        "@types/multer": "^1.4.12",
+        "@types/node": "^22.13.4"
+    }
+}

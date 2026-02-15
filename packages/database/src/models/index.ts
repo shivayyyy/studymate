@@ -1,0 +1,8 @@
+export { User, type IUserDocument } from './User.model';
+export { Room, type IRoomDocument } from './Room.model';
+export { StudySession, type IStudySessionDocument } from './StudySession.model';
+export { Post, type IPostDocument } from './Post.model';
+export { Like, type ILikeDocument } from './Like.model';
+export { Comment, type ICommentDocument } from './Comment.model';
+export { Save, type ISaveDocument } from './Save.model';
+export { Follow, type IFollowDocument } from './Follow.model';
