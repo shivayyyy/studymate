@@ -63,12 +63,17 @@ studymate/
 # Install dependencies
 bun install
 
-# Start local MongoDB + Redis (optional, if not using cloud)
-docker-compose up -d
+### 1. Configure Cloud Services
+This project uses MongoDB and Redis. You will need to spin up cloud instances (e.g., MongoDB Atlas, Upstash Redis) and get their connection URLs.
 
-# Copy env files
-cp apps/api/.env.example apps/api/.env
-cp apps/websocket/.env.example apps/websocket/.env
+1.  Copy the environment files:
+    ```bash
+    cp apps/api/.env.example apps/api/.env
+    cp apps/websocket/.env.example apps/websocket/.env
+    ```
+2.  Edit `.env` files and add your Cloud URLs:
+    - `MONGODB_URI`
+    - `REDIS_URL`
 
 # Run all apps in development
 bun run dev
