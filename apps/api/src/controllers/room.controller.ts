@@ -29,4 +29,24 @@ export class RoomController {
         const room = await Room.create(req.body);
         res.status(201).json(success(room, 'Room created'));
     });
+
+    static update = asyncHandler(async (req: Request, res: Response) => {
+        const room = await Room.findByIdAndUpdate(
+            req.params.id,
+            { $set: req.body },
+            { new: true, runValidators: true },
+        );
+        if (!room) throw new AppError('Room not found', 404);
+        res.json(success(room, 'Room updated'));
+    });
+
+    static remove = asyncHandler(async (req: Request, res: Response) => {
+        const room = await Room.findByIdAndUpdate(
+            req.params.id,
+            { isActive: false },
+            { new: true },
+        );
+        if (!room) throw new AppError('Room not found', 404);
+        res.json(success(room, 'Room deleted'));
+    });
 }

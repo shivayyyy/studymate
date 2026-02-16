@@ -6,6 +6,7 @@
         "dev": "turbo run dev --concurrency=20",
         "dev:api": "turbo run dev --filter=@studymate/api",
         "dev:ws": "turbo run dev --filter=@studymate/websocket",
+        "dev:web": "turbo run dev --filter=@studymate/web",
         "lint": "turbo run lint",
         "test": "turbo run test",
         "clean": "turbo run clean && rm -rf node_modules",
@@ -20,5 +21,8 @@
     "workspaces": [
         "apps/*",
         "packages/*"
-    ]
+    ],
+    "dependencies": {
+        "framer-motion": "^12.34.0"
+    }
 }

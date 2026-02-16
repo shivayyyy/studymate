@@ -9,5 +9,7 @@ const router = Router();
 router.get('/', RoomController.getAll);
 router.get('/:id', RoomController.getById);
 router.post('/', authenticate, validate(createRoomSchema), RoomController.create);
+router.put('/:id', authenticate, RoomController.update);
+router.delete('/:id', authenticate, RoomController.remove);
 
 export { router as roomRouter };

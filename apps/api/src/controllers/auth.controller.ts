@@ -1,8 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { User } from '@studymate/database';
 import { hashPassword, comparePassword, generateTokens, verifyRefreshToken } from '@studymate/auth';
+import { CacheManager } from '@studymate/cache';
+import { RedisKeys, RedisTTL } from '@studymate/config';
 import { asyncHandler, success, error } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
+import { createHash } from 'crypto';
 
 export class AuthController {
     static register = asyncHandler(async (req: Request, res: Response) => {
@@ -77,7 +80,18 @@ export class AuthController {
     });
 
     static logout = asyncHandler(async (req: Request, res: Response) => {
-        // In a full implementation, blacklist the token in Redis
+        // Blacklist the current access token
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            const tokenHash = createHash('sha256').update(token).digest('hex');
+            await CacheManager.set(
+                RedisKeys.blacklistedToken(tokenHash),
+                true,
+                RedisTTL.BLACKLISTED_TOKEN,
+            );
+        }
+
         res.json(success(null, 'Logged out successfully'));
     });
 }

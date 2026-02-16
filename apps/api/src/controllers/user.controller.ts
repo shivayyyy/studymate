@@ -1,28 +1,74 @@
 import type { Request, Response } from 'express';
 import { User, Follow } from '@studymate/database';
+import { UserCache } from '@studymate/cache';
 import { asyncHandler, success, parsePagination } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
 
 export class UserController {
     static getMe = asyncHandler(async (req: Request, res: Response) => {
-        const user = await User.findById(req.user!.userId).select('-passwordHash');
+        const userId = req.user!.userId;
+
+        // Check cache first
+        const cached = await UserCache.getProfile(userId);
+        if (cached) return res.json(success(cached));
+
+        const user = await User.findById(userId).select('-passwordHash');
         if (!user) throw new AppError('User not found', 404);
+
+        await UserCache.setProfile(userId, user.toObject());
         res.json(success(user));
     });
 
     static updateMe = asyncHandler(async (req: Request, res: Response) => {
-        const user = await User.findByIdAndUpdate(req.user!.userId, req.body, {
+        const userId = req.user!.userId;
+        const user = await User.findByIdAndUpdate(userId, req.body, {
             new: true,
             runValidators: true,
         }).select('-passwordHash');
         if (!user) throw new AppError('User not found', 404);
+
+        // Invalidate user cache
+        await UserCache.invalidateProfile(userId);
+
         res.json(success(user, 'Profile updated'));
     });
 
     static getById = asyncHandler(async (req: Request, res: Response) => {
-        const user = await User.findById(req.params.id).select('-passwordHash');
+        const userId = req.params.id as string;
+
+        // Check cache first
+        const cached = await UserCache.getProfile(userId);
+        if (cached) return res.json(success(cached));
+
+        const user = await User.findById(userId).select('-passwordHash');
         if (!user) throw new AppError('User not found', 404);
+
+        await UserCache.setProfile(userId, user.toObject());
         res.json(success(user));
+    });
+
+    static search = asyncHandler(async (req: Request, res: Response) => {
+        const { page, limit } = parsePagination(req.query as any);
+        const q = (req.query.q as string) || '';
+        if (q.trim().length === 0) throw new AppError('Search query is required', 400);
+
+        const filter: Record<string, any> = {
+            isActive: true,
+            $or: [
+                { username: { $regex: q, $options: 'i' } },
+                { fullName: { $regex: q, $options: 'i' } },
+            ],
+        };
+        if (req.query.examCategory) filter.examCategory = req.query.examCategory as string;
+
+        const users = await User.find(filter)
+            .select('-passwordHash')
+            .sort({ followersCount: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit);
+        const total = await User.countDocuments(filter);
+
+        res.json(success(users, 'Users found', { page, limit, total, totalPages: Math.ceil(total / limit) }));
     });
 
     static follow = asyncHandler(async (req: Request, res: Response) => {

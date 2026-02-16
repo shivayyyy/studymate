@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+    --font-sans: "Inter", system-ui, sans-serif;
+    --color-primary: #2563EB;
+    --color-primary-hover: #1D4ED8;
+    --color-bg-page: #F8FAFC;
+    --color-bg-card: #FFFFFF;
+}
+
+body {
+    background-color: var(--color-bg-page);
+    color: #1E293B;
+    font-family: var(--font-sans);
+}
+
+.layout-grid {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    min-height: 100vh;
+}
+
+@media (max-width: 768px) {
+    .layout-grid {
+        grid-template-columns: 1fr;
+    }
+}

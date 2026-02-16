@@ -18,6 +18,7 @@ import { postRouter } from './routes/post.routes';
 import { sessionRouter } from './routes/session.routes';
 import { feedRouter } from './routes/feed.routes';
 import { analyticsRouter } from './routes/analytics.routes';
+import uploadRouter from './routes/upload.routes';
 import { errorHandler } from './middleware/error-handler';
 
 const logger = createLogger('api');
@@ -61,6 +62,7 @@ app.use(`${API_PREFIX}/posts`, postRouter);
 app.use(`${API_PREFIX}/sessions`, sessionRouter);
 app.use(`${API_PREFIX}/feed`, feedRouter);
 app.use(`${API_PREFIX}/analytics`, analyticsRouter);
+app.use(`${API_PREFIX}/uploads`, uploadRouter);
 
 // ==================== Error Handling ====================
 

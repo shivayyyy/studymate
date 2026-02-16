@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { Post, Like, Comment, Save, User } from '@studymate/database';
+import { FeedCache } from '@studymate/cache';
 import { asyncHandler, success, parsePagination } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
 
@@ -29,8 +30,13 @@ export class PostController {
     });
 
     static create = asyncHandler(async (req: Request, res: Response) => {
-        const post = await Post.create({ ...req.body, userId: req.user!.userId });
-        await User.findByIdAndUpdate(req.user!.userId, { $inc: { postsCount: 1 } });
+        const userId = req.user!.userId;
+        const post = await Post.create({ ...req.body, userId });
+        await User.findByIdAndUpdate(userId, { $inc: { postsCount: 1 } });
+
+        // Invalidate feed caches
+        await FeedCache.invalidateUserFeed(userId);
+
         res.status(201).json(success(post, 'Post created'));
     });
 
@@ -84,6 +90,17 @@ export class PostController {
         const comment = await Comment.create({ userId: req.user!.userId, postId: req.params.id, content: req.body.content });
         await Post.findByIdAndUpdate(req.params.id, { $inc: { commentsCount: 1 } });
         res.status(201).json(success(comment, 'Comment added'));
+    });
+
+    static deleteComment = asyncHandler(async (req: Request, res: Response) => {
+        const comment = await Comment.findOneAndDelete({
+            _id: req.params.commentId,
+            userId: req.user!.userId,
+        });
+        if (!comment) throw new AppError('Comment not found or unauthorized', 404);
+
+        await Post.findByIdAndUpdate(req.params.id, { $inc: { commentsCount: -1 } });
+        res.json(success(null, 'Comment deleted'));
     });
 
     static save = asyncHandler(async (req: Request, res: Response) => {

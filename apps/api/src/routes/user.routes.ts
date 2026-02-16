@@ -8,6 +8,7 @@ const router = Router();
 
 router.get('/me', authenticate, UserController.getMe);
 router.put('/me', authenticate, validate(updateUserSchema), UserController.updateMe);
+router.get('/search', authenticate, UserController.search);
 router.get('/:id', UserController.getById);
 router.post('/:id/follow', authenticate, UserController.follow);
 router.delete('/:id/follow', authenticate, UserController.unfollow);

@@ -19,6 +19,7 @@ router.delete('/:id/like', authenticate, PostController.unlike);
 // Comments
 router.get('/:id/comments', PostController.getComments);
 router.post('/:id/comments', authenticate, validate(createCommentSchema), PostController.addComment);
+router.delete('/:id/comments/:commentId', authenticate, PostController.deleteComment);
 
 // Save
 router.post('/:id/save', authenticate, PostController.save);
