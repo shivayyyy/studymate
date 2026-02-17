@@ -1,0 +1,32 @@
+{
+    "name": "chat-service",
+    "version": "0.0.1",
+    "private": true,
+    "scripts": {
+        "build": "tsc",
+        "dev": "bun --watch src/index.ts",
+        "start": "bun dist/index.js",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@studymate/database": "workspace:*",
+        "@studymate/cache": "workspace:*",
+        "@studymate/config": "workspace:*",
+        "@studymate/logger": "workspace:*",
+        "@studymate/utils": "workspace:*",
+        "@studymate/auth": "workspace:*",
+        "express": "^4.21.2",
+        "cors": "^2.8.5",
+        "helmet": "^8.0.0",
+        "morgan": "^1.10.0",
+        "socket.io": "^4.7.5",
+        "@socket.io/redis-adapter": "^8.3.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.13.4",
+        "@types/express": "^5.0.0",
+        "@types/cors": "^2.8.17",
+        "@types/morgan": "^1.9.9"
+    }
+}

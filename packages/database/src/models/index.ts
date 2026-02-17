@@ -6,3 +6,5 @@ export { Like, type ILikeDocument } from './Like.model';
 export { Comment, type ICommentDocument } from './Comment.model';
 export { Save, type ISaveDocument } from './Save.model';
 export { Follow, type IFollowDocument } from './Follow.model';
+export { Conversation, type IConversationDocument } from './Conversation.model';
+export { Message, type IMessageDocument, MessageStatus, MessageType } from './Message.model';

@@ -10,6 +10,8 @@ import { connectDB } from '@studymate/database';
 import { connectRedis } from '@studymate/cache';
 import { createLogger } from '@studymate/logger';
 import { API_PREFIX, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS } from '@studymate/config';
+import http from 'http';
+
 
 import { authRouter } from './routes/auth.routes';
 import { userRouter } from './routes/user.routes';
@@ -18,6 +20,7 @@ import { postRouter } from './routes/post.routes';
 import { sessionRouter } from './routes/session.routes';
 import { feedRouter } from './routes/feed.routes';
 import { analyticsRouter } from './routes/analytics.routes';
+
 import uploadRouter from './routes/upload.routes';
 import { errorHandler } from './middleware/error-handler';
 
@@ -62,6 +65,7 @@ app.use(`${API_PREFIX}/posts`, postRouter);
 app.use(`${API_PREFIX}/sessions`, sessionRouter);
 app.use(`${API_PREFIX}/feed`, feedRouter);
 app.use(`${API_PREFIX}/analytics`, analyticsRouter);
+
 app.use(`${API_PREFIX}/uploads`, uploadRouter);
 
 // ==================== Error Handling ====================
@@ -77,6 +81,10 @@ const startServer = async () => {
 
         await connectRedis();
         logger.info('Redis connected');
+
+
+
+
 
         app.listen(PORT, () => {
             logger.info(`API server running on port ${PORT}`);
