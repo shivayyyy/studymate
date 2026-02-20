@@ -1,18 +1,159 @@
-import { useState } from 'react';
-import { Search, Bell, Plus, Image, FileText } from 'lucide-react';
-import PostCard from '../components/PostCard';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Bell } from 'lucide-react';
+import FeedPost from '../components/FeedPost';
 import RightSidebar from '../components/RightSidebar';
-import { posts } from '../data/mockPosts';
+import CreatePost from '../components/CreatePost';
+import { FeedService } from '../services/feed.service';
+import { Post } from '../types';
+import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
+import { useUserStore } from '../stores/useUserStore';
 
-const tabs = ['Trending', 'Following', 'Saved'];
+const tabs = ['Trending', 'Latest']; // Map to API types
 
 export default function FeedPage() {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('Trending');
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [cursor, setCursor] = useState<number | undefined>(undefined);
+    const [hasMore, setHasMore] = useState(true);
+    const { user } = useUserStore();
+
+    // Infinite Scroll
+    const { targetRef, isIntersecting } = useIntersectionObserver({
+        root: null,
+        rootMargin: '100px',
+        threshold: 0.1,
+    });
+
+    const fetchPosts = useCallback(async (reset = false) => {
+        if (loading || (!hasMore && !reset)) return;
+        setLoading(true);
+
+        try {
+            const type = activeTab.toLowerCase() as 'trending' | 'latest';
+            const examCategory = user?.examCategory || 'JEE';
+
+            const res = await FeedService.getFeed({
+                type,
+                examCategory: examCategory,
+                cursor: reset ? undefined : cursor,
+                limit: 10
+            });
+
+            if (res.success) {
+                setPosts(prev => reset ? res.data : [...prev, ...res.data]);
+                setCursor(res.meta?.nextCursor);
+                setHasMore(!!res.meta?.nextCursor);
+            }
+        } catch (error) {
+            console.error('Failed to fetch feed:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [activeTab, cursor, loading, hasMore, user]);
+
+    // Initial load & Tab change
+    useEffect(() => {
+        setPosts([]);
+        setCursor(undefined);
+        setHasMore(true);
+        fetchPosts(true);
+    }, [activeTab]);
+
+    // Infinite Scroll Trigger
+    useEffect(() => {
+        if (isIntersecting && hasMore && !loading) {
+            fetchPosts();
+        }
+    }, [isIntersecting, hasMore, loading, fetchPosts]);
+
+    const handlePostCreated = (newPost: Post) => {
+        setPosts(prev => [newPost, ...prev]);
+    };
+
+    const handleLike = async (postId: string) => {
+        // Optimistic update
+        setPosts(prev => prev.map(p => {
+            if (p._id === postId) {
+                return {
+                    ...p,
+                    likesCount: p.likesCount + (p.isLiked ? -1 : 1),
+                    isLiked: !p.isLiked
+                };
+            }
+            return p;
+        }));
+
+        try {
+            const post = posts.find(p => p._id === postId);
+            if (post?.isLiked) {
+                await FeedService.unlikePost(postId);
+            } else {
+                await FeedService.likePost(postId);
+            }
+        } catch (error) {
+            console.error('Like failed', error);
+            // Revert
+            setPosts(prev => prev.map(p => {
+                if (p._id === postId) {
+                    return {
+                        ...p,
+                        likesCount: p.likesCount + (p.isLiked ? -1 : 1),
+                        isLiked: !p.isLiked
+                    };
+                }
+                return p;
+            }));
+        }
+    };
+
+    const handleSave = async (postId: string) => {
+        // Optimistic update
+        setPosts(prev => prev.map(p => {
+            if (p._id === postId) {
+                return {
+                    ...p,
+                    savesCount: p.savesCount + (p.isSaved ? -1 : 1),
+                    isSaved: !p.isSaved
+                };
+            }
+            return p;
+        }));
+
+        try {
+            const post = posts.find(p => p._id === postId);
+            if (post?.isSaved) {
+                await FeedService.unsavePost(postId);
+            } else {
+                await FeedService.savePost(postId);
+            }
+        } catch (error) {
+            console.error('Save failed', error);
+            // Revert
+            setPosts(prev => prev.map(p => {
+                if (p._id === postId) {
+                    return {
+                        ...p,
+                        savesCount: p.savesCount + (p.isSaved ? -1 : 1),
+                        isSaved: !p.isSaved
+                    };
+                }
+                return p;
+            }));
+        }
+    };
+
+    const handleShare = (postId: string) => {
+        // Copy link to clipboard
+        const url = `${window.location.origin}/post/${postId}`;
+        navigator.clipboard.writeText(url);
+        alert('Link copied to clipboard!');
+    };
 
     return (
         <div className="p-8 max-w-[1600px] mx-auto">
-
-
             <div className="flex gap-8 items-start">
                 {/* Main Feed */}
                 <div className="flex-1 min-w-0 max-w-2xl mx-auto">
@@ -26,81 +167,11 @@ export default function FeedPage() {
                         />
                     </div>
 
-                    {/* Create Post Input - Twitter Style */}
-                    <div className="bg-white border-b border-slate-100 p-4 mb-4">
-                        <div className="flex gap-4">
-                            <div className="flex-shrink-0">
-                                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Aryan" alt="Profile" className="w-10 h-10 rounded-full hover:opacity-90 cursor-pointer" />
-                            </div>
-                            <div className="flex-1">
-                                <textarea
-                                    placeholder="What is happening?!"
-                                    className="w-full bg-transparent border-none outline-none text-slate-900 text-xl placeholder:text-slate-500 font-normal resize-none h-12 focus:ring-0 p-0 mb-2"
-                                    rows={1}
-                                />
-                                <div className="flex justify-between items-center pt-2 border-t border-slate-50">
-                                    <div className="flex gap-1 text-blue-500">
-                                        <div className="relative group">
-                                            <button className="p-2 hover:bg-blue-50 rounded-full transition-colors">
-                                                <Image size={20} />
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                Media
-                                            </div>
-                                        </div>
-                                        <div className="relative group">
-                                            <button className="p-2 hover:bg-blue-50 rounded-full transition-colors">
-                                                <FileText size={20} />
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                GIF
-                                            </div>
-                                        </div>
-                                        <div className="relative group">
-                                            <button className="p-2 hover:bg-blue-50 rounded-full transition-colors">
-                                                <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5 fill-current"><g><path d="M6 5.5C6 4.67157 6.67157 4 7.5 4C8.32843 4 9 4.67157 9 5.5V18.5C9 19.3284 8.32843 20 7.5 20C6.67157 20 6 19.3284 6 18.5V5.5ZM17.5 4C16.6716 4 16 4.67157 16 5.5V18.5C16 19.3284 16.6716 20 17.5 20C18.3284 20 19 19.3284 19 18.5V5.5C19 4.67157 18.3284 4 17.5 4ZM12.25 10.5C11.4216 10.5 10.75 11.1716 10.75 12V18.5C10.75 19.3284 11.4216 20 12.25 20C13.0784 20 13.75 19.3284 13.75 18.5V12C13.75 11.1716 13.0784 10.5 12.25 10.5Z"></path></g></svg>
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                Poll
-                                            </div>
-                                        </div>
-                                        <div className="relative group">
-                                            <button className="p-2 hover:bg-blue-50 rounded-full transition-colors">
-                                                <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5 fill-current"><g><path d="M8 10C8 11.1046 8.89543 12 10 12C11.1046 12 12 11.1046 12 10C12 8.89543 11.1046 8 10 8C8.89543 8 8 8.89543 8 10ZM14 10C14 11.1046 14.8954 12 16 12C17.1046 12 18 11.1046 18 10C18 8.89543 17.1046 8 16 8C14.8954 8 14 8.89543 14 10ZM12 19C9.79086 19 7.91508 17.5262 7.25208 15.5H5.11142C5.90159 18.8152 8.58332 21 12 21C15.4167 21 18.0984 18.8152 18.8886 15.5H16.7479C16.0849 17.5262 14.2091 19 12 19ZM2 10C2 15.5228 6.47715 20 12 20C17.5228 20 22 15.5228 22 10C22 4.47715 17.5228 0 12 0C6.47715 0 2 4.47715 2 10ZM20 10C20 14.4183 16.4183 18 12 18C7.58172 18 4 14.4183 4 10C4 5.58172 7.58172 2 12 2C16.4183 2 20 5.58172 20 10Z"></path></g></svg>
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                Emoji
-                                            </div>
-                                        </div>
-                                        <div className="relative group">
-                                            <button className="p-2 hover:bg-blue-50 rounded-full transition-colors">
-                                                <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5 fill-current"><g><path d="M6 3V2H8V3H16V2H18V3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H6ZM20 20V8H4V20H20ZM20 6H4V5H20V6ZM15 11H9V12H15V11ZM13 14H9V15H13V14Z"></path></g></svg>
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                Schedule
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className='flex items-center gap-3'>
-                                        <div className="relative group">
-                                            <button className="p-2 text-blue-500 hover:bg-blue-50 rounded-full transition-colors">
-                                                <Plus size={20} />
-                                            </button>
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                                                Add File
-                                            </div>
-                                        </div>
-                                        <button className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-1.5 rounded-full text-[15px] font-bold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                                            Post
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    {/* Create Post Component */}
+                    <CreatePost onPostCreated={handlePostCreated} />
 
-                    {/* Tabs - Minimal */}
-                    <div className="flex border-b border-slate-100 mb-6 bg-white sticky top-0 z-10 opacity-95 backdrop-blur">
+                    {/* Tabs */}
+                    <div className="flex border-b border-slate-100 mb-6 bg-white sticky top-0 z-10 opacity-95 backdrop-blur rounded-t-xl">
                         {tabs.map(tab => (
                             <button
                                 key={tab}
@@ -118,15 +189,42 @@ export default function FeedPage() {
 
                     {/* Posts */}
                     <div className="space-y-4">
-                        {posts.map((post, index) => (
-                            <PostCard key={post.id} post={post} index={index} />
+                        {posts.map((post) => (
+                            <FeedPost
+                                key={post._id}
+                                post={post}
+                                onLike={() => handleLike(post._id)}
+                                onComment={() => navigate(`/post/${post._id}`)}
+                                onSave={() => handleSave(post._id)}
+                                onShare={() => handleShare(post._id)}
+                            />
                         ))}
+
+                        {/* Loading Indicator */}
+                        {loading && (
+                            <div className="p-4 text-center text-slate-500">
+                                Loading...
+                            </div>
+                        )}
+
+                        {/* Intersection Target */}
+                        <div ref={targetRef} className="h-4" />
+
+                        {!loading && !hasMore && posts.length > 0 && (
+                            <div className="p-4 text-center text-slate-400 text-sm">
+                                No more posts
+                            </div>
+                        )}
+                        {!loading && posts.length === 0 && (
+                            <div className="p-8 text-center text-slate-500">
+                                No posts to show in {activeTab}
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* Right Sidebar Column */}
                 <div className="hidden xl:block w-80 space-y-6">
-                    {/* Profile Header */}
                     <div className="flex items-center justify-end gap-4 mb-2">
                         <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
                             <Bell size={24} />
@@ -135,13 +233,12 @@ export default function FeedPage() {
 
                         <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
                             <div className="text-right hidden sm:block">
-                                <h4 className="font-bold text-sm text-slate-900">Aryan Sharma</h4>
-                                <p className="text-xs text-slate-500">JEE Aspirant</p>
+                                <h4 className="font-bold text-sm text-slate-900">{user?.fullName || 'Guest'}</h4>
+                                <p className="text-xs text-slate-500">{user?.username ? `@${user.username}` : ''}</p>
                             </div>
-                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Aryan" alt="Profile" className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200" />
+                            <img src={user?.profilePicture || "https://api.dicebear.com/7.x/avataaars/svg?seed=User"} alt="Profile" className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200" />
                         </div>
                     </div>
-
                     <RightSidebar />
                 </div>
             </div>

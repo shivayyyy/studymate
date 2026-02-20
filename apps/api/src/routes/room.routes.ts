@@ -1,15 +1,17 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
-import { validate } from '../middleware/validate.middleware';
-import { createRoomSchema } from '@studymate/validation';
 import { RoomController } from '../controllers/room.controller';
+import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/', RoomController.getAll);
-router.get('/:id', RoomController.getById);
-router.post('/', authenticate, validate(createRoomSchema), RoomController.create);
-router.put('/:id', authenticate, RoomController.update);
-router.delete('/:id', authenticate, RoomController.remove);
+// Public routes (if any? listing might be public? usually better protected)
+// Let's protect all for now as user needs to be logged in to be in the app
 
-export { router as roomRouter };
+router.use(authenticate);
+
+router.post('/', RoomController.createRoom);
+router.get('/', RoomController.getRooms);
+router.get('/:id', RoomController.getRoomById);
+router.post('/:id/join', RoomController.joinRoom);
+
+export const roomRouter = router;

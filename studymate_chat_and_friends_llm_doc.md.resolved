@@ -1,0 +1,841 @@
+# StudyMate — Chat Application & Friend Request System (LLM Implementation Guide)
+
+> **Purpose**: This document gives an LLM everything it needs to implement a production-ready **real-time chat application** and an **Instagram-style friend request system** within the existing StudyMate monorepo. It covers architecture, existing code inventory, database schemas, socket event contracts, API endpoints, and step-by-step implementation specifications.
+
+---
+
+## 1. Project Overview & Architecture
+
+### 1.1 Monorepo Structure (TurboRepo + Bun)
+
+```
+studymate/
+├── apps/
+│   ├── api/           → Express REST API (port 3001) — Clerk auth, user/room/post/feed CRUD
+│   ├── web/           → React SPA (Vite, port 5173) — Clerk frontend, Zustand stores
+│   ├── chat-service/  → Express + Socket.io server (port 3002) — DM & room chat
+│   └── websocket/     → Standalone Socket.io server (port 3002) — room-level chat/timer/presence
+├── packages/
+│   ├── database/      → Mongoose models (User, Conversation, Message, Follow, Room, Post, etc.)
+│   ├── types/         → Shared TypeScript types & enums
+│   ├── cache/         → Redis client, CacheManager, pattern caches (UserCache, RoomCache, etc.)
+│   ├── auth/          → JWT generation/verification (generateTokens, verifyAccessToken, etc.)
+│   ├── config/        → Constants (API_PREFIX = '/api/v1', RedisKeys, RedisTTL)
+│   ├── logger/        → Winston logger factory (createLogger)
+│   ├── utils/         → asyncHandler, success/error response helpers, parsePagination
+│   ├── validation/    → Zod schemas
+│   └── ...            → analytics, notifications, queue, storage
+└── package.json       → Workspace root with TurboRepo
+```
+
+### 1.2 Auth Architecture
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Frontend** | Clerk React SDK (`@clerk/clerk-react`) — `useAuth()` provides session tokens |
+| **API** | `@clerk/express` middleware → `getAuth(req)` extracts `clerkUserId` → looks up `User.clerkId` in MongoDB |
+| **Chat-Service** (HTTP) | Custom JWT Bearer auth (`@studymate/auth` — `verifyAccessToken`) with Redis token blacklisting |
+| **Chat-Service** (Socket) | Socket.io auth middleware reads `socket.handshake.auth.token` → `verifyAccessToken` → sets `socket.user` |
+| **Websocket server** | Same JWT pattern via `socket.handshake.auth?.token` → `verifyAccessToken` → sets `socket.data.userId` |
+
+> **Key Insight**: The API uses **Clerk** tokens. The chat-service uses **custom JWT** tokens from `@studymate/auth`. The frontend axios interceptor attaches the Clerk token via [setClerkGetToken(getToken)](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/lib/axios.ts#11-14). For Socket.io connections, the client must send a custom JWT token in `socket.handshake.auth.token`.
+
+### 1.3 Real-time Infrastructure
+
+```mermaid
+graph TD
+    A["React SPA (web)"] -->|HTTP REST| B["API Server :3001"]
+    A -->|Socket.io| C["Chat-Service :3002"]
+    B -->|MongoDB| D["MongoDB"]
+    C -->|MongoDB| D
+    C -->|Redis Pub/Sub| E["Redis"]
+    C -->|Redis Adapter| E
+    
+    subgraph "Chat-Service Socket.io"
+        C --> F["user:{userId} rooms (auto-join)"]
+        C --> G["conversation:{id} rooms"]
+        C --> H["room:{id} rooms"]
+    end
+```
+
+---
+
+## 2. Existing Database Models (packages/database)
+
+### 2.1 User Model ([User.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/User.model.ts))
+
+```typescript
+interface IUserDocument extends Document {
+    email: string;                   // unique, lowercase
+    username: string;                // unique, lowercase
+    passwordHash?: string;
+    fullName: string;
+    profilePicture?: string;
+    examCategory?: 'JEE' | 'NEET' | 'UPSC' | 'GATE';
+    subjects: string[];
+    targetYear?: number;
+    googleId?: string;               // sparse unique
+    clerkId?: string;                // sparse unique — primary auth lookup
+    bio?: string;                    // max 200
+    dailyStudyGoal: number;          // default 4
+    timerPreference: { mode, focusDuration, breakDuration };
+    totalStudyHours: number;
+    currentStreak: number;
+    longestStreak: number;
+    followersCount: number;          // denormalized counter
+    followingCount: number;          // denormalized counter
+    postsCount: number;
+    contributorBadge?: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+    isVerified: boolean;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+```
+
+### 2.2 Follow Model ([Follow.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Follow.model.ts)) — CURRENT: Direct Follow (No Request System)
+
+```typescript
+interface IFollowDocument extends Document {
+    followerId: ObjectId;   // The user who follows
+    followingId: ObjectId;  // The user being followed
+    createdAt: Date;
+}
+// Indexes: (followerId, followingId) unique, (followingId, createdAt), (followerId, createdAt)
+```
+
+> **Current behavior**: `POST /:id/follow` creates a Follow immediately — no request/accept flow. This is what needs to change for the Instagram-style friend request feature.
+
+### 2.3 Conversation Model ([Conversation.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Conversation.model.ts))
+
+```typescript
+interface IConversationDocument extends Document {
+    participants: ObjectId[];       // Array of User refs (always 2 for DMs)
+    lastMessage?: ObjectId;         // ref: Message
+    lastMessageAt?: Date;
+    createdAt: Date;
+    updatedAt: Date;
+}
+// Indexes: participants, lastMessageAt desc
+```
+
+### 2.4 Message Model ([Message.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Message.model.ts))
+
+```typescript
+enum MessageStatus { SENT = 'sent', DELIVERED = 'delivered', READ = 'read' }
+enum MessageType   { TEXT = 'text', IMAGE = 'image', FILE = 'file' }
+
+interface IMessageDocument extends Document {
+    conversationId?: ObjectId;      // For DMs (1-on-1)
+    roomId?: ObjectId;              // For study-room group chat
+    senderId: ObjectId;             // ref: User
+    text: string;
+    messageType: MessageType;
+    mediaUrl?: string;
+    status: MessageStatus;
+    createdAt: Date;
+    updatedAt: Date;
+}
+// Indexes: (conversationId, createdAt desc), (roomId, createdAt desc), senderId
+```
+
+### 2.5 Room Model ([Room.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Room.model.ts))
+
+```typescript
+interface IRoomDocument extends Document {
+    name: string;
+    description?: string;
+    type: 'PUBLIC' | 'PRIVATE';
+    password?: string;              // select: false
+    createdBy: ObjectId;
+    examCategory: 'JEE' | 'NEET' | 'UPSC' | 'GATE';
+    subject: string;
+    timerMode: 'POMODORO_25_5' | 'EXTENDED_45_10' | 'LONG_90_20' | 'CUSTOM';
+    customTimerConfig?: { focusMinutes, breakMinutes };
+    currentOccupancy: number;
+    maxOccupancy: number;           // default 50
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+```
+
+---
+
+## 3. Existing Chat Infrastructure (What's Already Built)
+
+### 3.1 Chat-Service — `apps/chat-service/`
+
+#### Entry Point (`index.ts`)
+- Express server on port `CHAT_SERVICE_PORT` (default 3002)
+- Connects to MongoDB and Redis on startup
+- Initializes `SocketService.init(httpServer)` — attaches Socket.io to the HTTP server
+- Mounts REST routes at `/api/v1/chat/...`
+
+#### SocketService (`services/SocketService.ts`) — THE CORE REAL-TIME ENGINE
+
+**On connection:**
+1. Authenticates via `socketAuth` middleware (JWT from `socket.handshake.auth.token`)
+2. Auto-joins `user:{userId}` room (for notifications/DM delivery)
+3. Updates Redis presence: adds `userId` to `online_users` set, tracks `user:{userId}:sockets` set for multi-device
+
+**Socket Events Handled:**
+
+| Event | Direction | Payload | Action |
+|-------|-----------|---------|--------|
+| `join_conversation` | Client → Server | `conversationId: string` | Validates user is participant → joins `conversation:{id}` room |
+| `join_room` | Client → Server | `roomId: string` | Validates room exists & active → joins `room:{id}` room |
+| `mark_read` | Client → Server | `{ conversationId, messageIds[] }` | Updates Message status to READ in DB → emits `message_read` to conversation |
+| `mark_delivered` | Client → Server | `{ conversationId, messageIds[] }` | Updates Message status to DELIVERED (only if SENT) → emits `message_delivered` |
+| `typing` | Client → Server | `{ conversationId?, roomId? }` | Broadcasts `typing` event to the relevant room |
+| `disconnect` | Auto | — | Cleans Redis presence: removes socket from set, removes from `online_users` if no remaining sockets |
+
+**Server-Emitted Events:**
+
+| Event | Direction | Payload | When |
+|-------|-----------|---------|------|
+| `new_message` | Server → Clients | Message document | When ChatService.sendMessage() is called |
+| `notification` | Server → Individual User | `{ type: 'NEW_MESSAGE', message }` | Sent to non-sender participants via `user:{participantId}` room |
+| `message_read` | Server → Conversation | `{ conversationId, messageIds, readBy, at }` | When `mark_read` is processed |
+| `message_delivered` | Server → Conversation | `{ conversationId, messageIds, deliveredTo, at }` | When `mark_delivered` is processed |
+| `typing` | Server → Room/Conversation | `{ userId, conversationId?, roomId? }` | Relayed typing indicator |
+| `error` | Server → Client | `{ message }` | On unauthorized access attempts |
+
+#### ChatService (`services/ChatService.ts`) — BUSINESS LOGIC
+
+```typescript
+class ChatService {
+    // Find or create a 1-on-1 conversation (deduplicates by sorted participants)
+    static startConversation(participants: string[]): Promise<Conversation>
+
+    // Create message in DB, update conversation.lastMessage, emit via SocketService.io
+    static sendMessage(senderId, text, { conversationId?, roomId?, type? }): Promise<Message>
+
+    // Paginated message retrieval with sender populated
+    static getMessages({ conversationId?, roomId?, limit=50, skip=0 }): Promise<Message[]>
+
+    // Get user's conversation list sorted by lastMessageAt
+    static getUserConversations(userId): Promise<Conversation[]>
+}
+```
+
+#### REST API Routes (`routes/chat.routes.ts`)
+
+All routes protected by `authenticate` middleware (custom JWT):
+
+| Method | Path | Controller | Purpose |
+|--------|------|------------|---------|
+| POST | `/conversations` | `startConversation` | Create or find existing conversation |
+| GET | `/conversations` | `getConversations` | List user's conversations |
+| GET | `/conversations/:conversationId/messages` | `getMessages` | Get messages for a conversation |
+| POST | `/conversations/:conversationId/messages` | `sendMessage` | Send message to conversation |
+| GET | `/rooms/:roomId/messages` | `getMessages` | Get messages for a study room |
+| POST | `/rooms/:roomId/messages` | `sendMessage` | Send message to study room |
+
+### 3.2 Websocket Server — `apps/websocket/` (SEPARATE from chat-service)
+
+> **Important**: This is a **separate Socket.io server** from the chat-service. It handles the study room real-time features (Pomodoro timers, room occupancy, in-room chat). The chat-service handles DM conversations.
+
+**Handlers registered on connection:**
+
+| Handler File | Events | Purpose |
+|-------------|--------|---------|
+| `chat.handler.ts` | `chat:send`, `chat:typing`, `chat:stop-typing` | In-room text chat (ephemeral, no DB persistence) |
+| `room.handler.ts` | `room:join`, `room:leave` | Room join/leave with Redis occupancy tracking |
+| `presence.handler.ts` | `presence:update` | User presence status (ONLINE/IDLE/OFFLINE) via UserCache |
+| `timer.handler.ts` | `timer:start`, `timer:pause`, `timer:reset`, `timer:sync` | Shared Pomodoro timer state via Redis |
+
+### 3.3 Frontend — `apps/web/`
+
+#### DMPage (`pages/DMPage.tsx`)
+- **View 1** (no chatId): User directory/search grid — searches users by username, shows cards with "Message" button
+- **View 2** (with chatId): Chat interface with header, messages area (currently hardcoded placeholder messages), and input
+- **Not yet wired**: No socket connection, no real message sending/receiving, no conversation list in sidebar
+
+#### Routing (`App.tsx`)
+```
+/dms        → DMPage (user search)
+/dms/:chatId → DMPage (chat with user)
+```
+Protected by `ProtectedRoute` which requires Clerk sign-in and profile completion.
+
+#### State Management
+- `useUserStore` (Zustand + localStorage persist) — current user profile
+- `api` (axios) — baseURL `/api/v1`, Clerk token interceptor
+
+#### Auth Bridge
+- `ClerkAuthBridge` component syncs Clerk session → calls `POST /auth/sync` → stores user in Zustand store
+
+### 3.4 API User Routes — Follow System (`apps/api/`)
+
+| Method | Path | Auth | Controller | Purpose |
+|--------|------|------|------------|---------|
+| POST | `/users/:id/follow` | ✅ | `UserController.follow` | Creates Follow doc, increments counters |
+| DELETE | `/users/:id/follow` | ✅ | `UserController.unfollow` | Deletes Follow doc, decrements counters |
+| GET | `/users/:id/followers` | ❌ | `UserController.getFollowers` | Paginated followers list |
+| GET | `/users/:id/following` | ❌ | `UserController.getFollowing` | Paginated following list |
+| GET | `/users/search` | ✅ | `UserController.search` | Search by username/fullName |
+| GET | `/users/:id` | ❌ | `UserController.getById` | Get public profile |
+
+---
+
+## 4. FEATURE 1: Complete Chat Application Flow
+
+### 4.1 What Needs to Be Built (Gap Analysis)
+
+| Component | Status | What's Needed |
+|-----------|--------|---------------|
+| Chat-service backend (API + Socket) | ✅ Built | Minor enhancements only |
+| Frontend Socket.io client connection | ❌ Missing | Socket.io client setup with auth |
+| Frontend chat store (Zustand) | ❌ Missing | Conversations, messages, typing, online status |
+| Frontend chat service (HTTP) | ❌ Missing | API calls to chat-service REST endpoints |
+| DMPage real message flow | ❌ Missing | Replace placeholder with real message send/receive |
+| Conversation list sidebar | ❌ Missing | Show recent conversations with last message |
+| Real-time message delivery | ⚠️ Backend ready | Frontend needs to listen for `new_message` events |
+| Read receipts UI | ❌ Missing | Emit `mark_read` when viewing, display status |
+| Typing indicators | ⚠️ Backend ready | Frontend needs to emit/listen `typing` events |
+| Online presence indicators | ⚠️ Backend ready | Frontend needs to query/subscribe to presence |
+
+### 4.2 Implementation Spec — Frontend Socket Client
+
+#### File: `apps/web/src/lib/socket.ts` [NEW]
+
+```typescript
+// Create a Socket.io client that connects to the chat-service
+// Must send the auth token in handshake.auth.token
+// IMPORTANT: The chat-service uses @studymate/auth JWT, NOT Clerk tokens
+// So either:
+//   Option A: Chat-service is updated to accept Clerk tokens (preferred for consistency)
+//   Option B: Frontend obtains a separate JWT from the API and passes it to socket
+
+import { io, Socket } from 'socket.io-client';
+
+const CHAT_SERVICE_URL = import.meta.env.VITE_CHAT_SERVICE_URL || 'http://localhost:3002';
+
+let socket: Socket | null = null;
+
+export const connectSocket = (token: string): Socket => {
+    if (socket?.connected) return socket;
+    
+    socket = io(CHAT_SERVICE_URL, {
+        auth: { token },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+    });
+    
+    return socket;
+};
+
+export const getSocket = (): Socket | null => socket;
+export const disconnectSocket = () => { socket?.disconnect(); socket = null; };
+```
+
+#### File: `apps/web/src/stores/useChatStore.ts` [NEW]
+
+```typescript
+// Zustand store managing:
+// - conversations: Conversation[] (sorted by lastMessageAt)
+// - activeConversationId: string | null
+// - messages: Map<conversationId, Message[]>
+// - typingUsers: Map<conversationId, string[]>
+// - onlineUsers: Set<string>
+// - unreadCounts: Map<conversationId, number>
+//
+// Actions:
+// - fetchConversations() — GET /api/v1/chat/conversations
+// - fetchMessages(conversationId, pagination) — GET /api/v1/chat/conversations/:id/messages
+// - sendMessage(conversationId, text) — POST /api/v1/chat/conversations/:id/messages
+// - startConversation(participantId) — POST /api/v1/chat/conversations
+// - setActiveConversation(id) — join socket room, mark as read
+// - addIncomingMessage(message) — called from socket listener
+// - setTyping(conversationId, userId, isTyping) — called from socket listener
+```
+
+#### File: `apps/web/src/services/chat.service.ts` [NEW]
+
+```typescript
+// HTTP client for chat-service REST endpoints
+// Uses axios with proper base URL pointing to chat-service
+// 
+// ChatApiService.startConversation(participantId): Promise<Conversation>
+// ChatApiService.getConversations(): Promise<Conversation[]>
+// ChatApiService.getMessages(conversationId, { limit, skip }): Promise<Message[]>
+// ChatApiService.sendMessage(conversationId, text): Promise<Message>
+```
+
+### 4.3 Complete Message Flow — Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U1 as User A (Browser)
+    participant WS as Chat-Service Socket.io
+    participant API as Chat-Service REST API
+    participant DB as MongoDB
+    participant Redis as Redis
+    participant U2 as User B (Browser)
+
+    Note over U1,U2: 1. Connection & Auth
+    U1->>WS: connect({ auth: { token } })
+    WS->>WS: socketAuth middleware (verify JWT)
+    WS->>Redis: SADD online_users, userId
+    WS->>Redis: SADD user:{userId}:sockets, socketId
+    WS-->>U1: connected (auto-joined user:{userId} room)
+
+    Note over U1,U2: 2. Open Conversation
+    U1->>API: POST /chat/conversations { participantId: userB }
+    API->>DB: findOne or create Conversation
+    API-->>U1: conversation { _id, participants }
+    U1->>WS: emit('join_conversation', conversationId)
+    WS->>DB: Verify user is participant
+    WS-->>U1: Joined conversation:{id} room
+
+    Note over U1,U2: 3. Send Message
+    U1->>API: POST /chat/conversations/:id/messages { text }
+    API->>DB: Create Message document
+    API->>DB: Update conversation.lastMessage
+    API->>WS: SocketService.io.to('conversation:{id}').emit('new_message', msg)
+    WS-->>U1: new_message (sees own message confirmed)
+    WS-->>U2: new_message (if in conversation room)
+    API->>WS: SocketService.io.to('user:{userB}').emit('notification', { type: 'NEW_MESSAGE' })
+    WS-->>U2: notification (even if not in conversation room — delivered to user's private room)
+
+    Note over U1,U2: 4. Typing Indicators
+    U1->>WS: emit('typing', { conversationId })
+    WS-->>U2: typing { userId, conversationId }
+
+    Note over U1,U2: 5. Read Receipts
+    U2->>WS: emit('mark_read', { conversationId, messageIds })
+    WS->>DB: Update messages status → READ
+    WS-->>U1: message_read { conversationId, messageIds, readBy }
+
+    Note over U1,U2: 6. Disconnect
+    U1->>WS: disconnect
+    WS->>Redis: SREM user:{userId}:sockets, socketId
+    WS->>Redis: Check remaining sockets → if 0: SREM online_users, userId
+```
+
+### 4.4 Frontend Component Architecture
+
+```mermaid
+graph TD
+    A["DMPage.tsx"] --> B["ConversationList (sidebar)"]
+    A --> C["ChatWindow (main area)"]
+    
+    B --> B1["Search bar"]
+    B --> B2["ConversationItem[] (avatar, name, last msg, unread badge, time)"]
+    
+    C --> C1["ChatHeader (user info, online status, call/video buttons)"]
+    C --> C2["MessageList (infinite scroll up, date separators)"]
+    C --> C3["TypingIndicator"]
+    C --> C4["MessageInput (text field, send button, attach)"]
+    
+    C2 --> C2a["MessageBubble (text, time, status: ✓ ✓✓ 👁)"]
+    
+    D["useChatStore"] --> A
+    E["socket.ts"] --> D
+```
+
+### 4.5 Key Implementation Details
+
+#### Message Status Display
+- `sent` → Single gray check ✓
+- `delivered` → Double gray checks ✓✓  
+- `read` → Double blue checks ✓✓ (blue)
+
+#### Conversation List Ordering
+- Sort by `lastMessageAt` descending
+- Show unread badge count per conversation
+- Show last message preview (truncated)
+- Show online indicator from `onlineUsers` set
+
+#### Infinite Scroll Messages
+- Load latest 50 messages initially
+- Scroll up to load older messages (skip-based pagination)
+- New messages append at bottom and auto-scroll
+
+#### Socket Room Management
+```
+On login/app init:    → connectSocket(token)
+On open conversation: → emit('join_conversation', conversationId)
+On close/navigate:    → leave previous conversation room (optional, server handles disconnect)
+On logout:            → disconnectSocket()
+```
+
+---
+
+## 5. FEATURE 2: Instagram-Style Friend Request System
+
+### 5.1 Current State vs Target
+
+| Current | Target |
+|---------|--------|
+| Direct follow (no approval needed) | Send request → recipient accepts/declines |
+| Follow model: `{ followerId, followingId }` | New FriendRequest model + modified Follow flow |
+| No notifications for follows | Real-time notifications for request/accept via socket |
+| Follow/unfollow buttons | Request/Accept/Decline/Cancel buttons |
+| Public follow counts | Same, but only increment on acceptance |
+
+### 5.2 New Database Model — `FriendRequest.model.ts` [NEW]
+
+```typescript
+// File: packages/database/src/models/FriendRequest.model.ts
+
+import mongoose, { Schema, Document, Types } from 'mongoose';
+
+export enum FriendRequestStatus {
+    PENDING = 'pending',
+    ACCEPTED = 'accepted',
+    DECLINED = 'declined',
+    CANCELLED = 'cancelled',
+}
+
+export interface IFriendRequestDocument extends Document {
+    senderId: Types.ObjectId;        // User who sent the request
+    receiverId: Types.ObjectId;      // User who receives the request
+    status: FriendRequestStatus;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+const FriendRequestSchema = new Schema<IFriendRequestDocument>(
+    {
+        senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        receiverId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        status: {
+            type: String,
+            enum: Object.values(FriendRequestStatus),
+            default: FriendRequestStatus.PENDING,
+        },
+    },
+    { timestamps: true }
+);
+
+// Ensure one active request per pair
+FriendRequestSchema.index({ senderId: 1, receiverId: 1, status: 1 });
+// Quick lookup for a user's incoming requests
+FriendRequestSchema.index({ receiverId: 1, status: 1, createdAt: -1 });
+// Quick lookup for a user's outgoing requests
+FriendRequestSchema.index({ senderId: 1, status: 1, createdAt: -1 });
+
+export const FriendRequest = mongoose.model<IFriendRequestDocument>('FriendRequest', FriendRequestSchema);
+```
+
+### 5.3 API Endpoints — `apps/api/src/routes/friend.routes.ts` [NEW]
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/friends/request/:userId` | ✅ | Send friend request to userId |
+| POST | `/friends/accept/:requestId` | ✅ | Accept a pending request |
+| POST | `/friends/decline/:requestId` | ✅ | Decline a pending request |
+| DELETE | `/friends/cancel/:requestId` | ✅ | Cancel your own pending request |
+| GET | `/friends/requests/incoming` | ✅ | Get paginated incoming pending requests |
+| GET | `/friends/requests/outgoing` | ✅ | Get paginated outgoing pending requests |
+| GET | `/friends` | ✅ | Get paginated friends list (mutual follows) |
+| GET | `/friends/status/:userId` | ✅ | Get relationship status with a specific user |
+| DELETE | `/friends/:userId` | ✅ | Unfriend (remove both Follow directions) |
+
+### 5.4 Controller Logic — `apps/api/src/controllers/friend.controller.ts` [NEW]
+
+```typescript
+class FriendController {
+    // POST /friends/request/:userId
+    static sendRequest = asyncHandler(async (req, res) => {
+        const senderId = req.user!.userId;
+        const receiverId = req.params.userId;
+        
+        // Validations:
+        // 1. Can't send to yourself
+        // 2. Receiver must exist and be active
+        // 3. No existing PENDING request in either direction
+        // 4. Not already friends (no Follow pair in both directions)
+        
+        // Create FriendRequest with status: PENDING
+        // Emit real-time notification to receiver via socket:
+        //   SocketService.io.to(`user:${receiverId}`).emit('friend_request', { ... })
+    });
+
+    // POST /friends/accept/:requestId
+    static acceptRequest = asyncHandler(async (req, res) => {
+        const currentUserId = req.user!.userId;
+        const requestId = req.params.requestId;
+        
+        // Find request, verify currentUser is the receiver
+        // Update status → ACCEPTED
+        // Create TWO Follow documents (mutual):
+        //   Follow { followerId: senderId, followingId: receiverId }
+        //   Follow { followerId: receiverId, followingId: senderId }
+        // Increment both users' followersCount and followingCount by 1
+        // Emit notification to sender: 'friend_request_accepted'
+    });
+
+    // POST /friends/decline/:requestId
+    static declineRequest = asyncHandler(async (req, res) => {
+        // Verify currentUser is receiver
+        // Update status → DECLINED
+    });
+
+    // DELETE /friends/cancel/:requestId
+    static cancelRequest = asyncHandler(async (req, res) => {
+        // Verify currentUser is sender
+        // Update status → CANCELLED (or just delete the request)
+    });
+
+    // GET /friends/status/:userId
+    static getStatus = asyncHandler(async (req, res) => {
+        const currentUserId = req.user!.userId;
+        const targetUserId = req.params.userId;
+        
+        // Return one of:
+        // { status: 'none' }           — no relationship
+        // { status: 'pending_sent', requestId }    — currentUser sent request
+        // { status: 'pending_received', requestId } — currentUser received request
+        // { status: 'friends' }        — mutual follow exists
+    });
+
+    // DELETE /friends/:userId
+    static unfriend = asyncHandler(async (req, res) => {
+        // Delete BOTH Follow docs (mutual)
+        // Decrement both users' followersCount and followingCount
+    });
+}
+```
+
+### 5.5 Socket Events for Friend Requests (Real-Time Notifications)
+
+Add these to the existing `SocketService.ts` event emissions (called from controller):
+
+| Event | Emitted To | Payload | Trigger |
+|-------|-----------|---------|---------|
+| `friend_request` | `user:{receiverId}` | `{ requestId, sender: { _id, username, fullName, profilePicture } }` | Request sent |
+| `friend_request_accepted` | `user:{senderId}` | `{ requestId, acceptedBy: { _id, username, fullName, profilePicture } }` | Request accepted |
+| `friend_request_declined` | `user:{senderId}` | `{ requestId }` | Request declined |
+| `friend_request_cancelled` | `user:{receiverId}` | `{ requestId }` | Request cancelled |
+
+> **Implementation note**: Since the API server uses Clerk auth (not the chat-service's Socket.io), the API cannot directly call `SocketService.io.emit()`. Solutions:
+> 1. **Redis Pub/Sub bridge**: API publishes to a Redis channel, chat-service subscribes and emits socket events
+> 2. **Internal HTTP call**: API calls chat-service's internal endpoint to trigger socket emission
+> 3. **Move friend request routes to chat-service**: If socket notifications are critical
+> 4. **Shared Redis event bus** (recommended): Publish events to Redis, chat-service SocketService subscribes
+
+### 5.6 Frontend Components for Friend Requests
+
+#### Zustand Store: `apps/web/src/stores/useFriendStore.ts` [NEW]
+
+```typescript
+interface FriendState {
+    incomingRequests: FriendRequest[];
+    outgoingRequests: FriendRequest[];
+    friends: User[];
+    incomingCount: number;  // badge count
+    
+    fetchIncoming(): Promise<void>;
+    fetchOutgoing(): Promise<void>;
+    fetchFriends(): Promise<void>;
+    sendRequest(userId: string): Promise<void>;
+    acceptRequest(requestId: string): Promise<void>;
+    declineRequest(requestId: string): Promise<void>;
+    cancelRequest(requestId: string): Promise<void>;
+    unfriend(userId: string): Promise<void>;
+    getStatus(userId: string): Promise<RelationshipStatus>;
+}
+```
+
+#### UI Components:
+
+1. **FriendRequestButton** — Smart button shown on user profiles/cards:
+   - State `none` → "Add Friend" button (sends request)
+   - State `pending_sent` → "Request Sent" button (click to cancel)
+   - State `pending_received` → "Accept" / "Decline" buttons
+   - State `friends` → "Friends ✓" button (click to unfriend with confirmation)
+
+2. **FriendRequestsPage** or **FriendRequestsModal** — List of incoming/outgoing:
+   - Tabs: "Received" / "Sent"
+   - Each card: user avatar, name, username, Accept/Decline or Cancel buttons
+   - Real-time updates via socket
+
+3. **Notification Badge** — In sidebar/header:
+   - Shows count of pending incoming requests
+   - Updates in real-time when `friend_request` socket event received
+
+4. **Friends List** — In profile page or dedicated page:
+   - Grid of friend cards with chat/unfriend actions
+
+### 5.7 Relationship Between Friends & Chat
+
+> **Design Decision**: Only friends (mutual follows) should be able to DM each other. This is the Instagram model.
+
+**Enforce in ChatService.startConversation():**
+```typescript
+// Before creating conversation, verify both users follow each other
+const mutualFollow = await Follow.findOne({ followerId: userId1, followingId: userId2 });
+const reversFollow = await Follow.findOne({ followerId: userId2, followingId: userId1 });
+if (!mutualFollow || !reversFollow) {
+    throw new AppError('You can only message friends', 403);
+}
+```
+
+**Enforce in DMPage UI:**
+- Only show "Message" button on users who are friends
+- Non-friends see "Add Friend" button instead
+
+---
+
+## 6. Shared Enums & Types (packages/types)
+
+### Existing Enums (`enums.ts`)
+
+```typescript
+enum ExamCategory { JEE, NEET, UPSC, GATE }
+enum TimerMode { POMODORO_25_5, EXTENDED_45_10, LONG_90_20, CUSTOM }
+enum TimerPhase { FOCUS, SHORT_BREAK, LONG_BREAK }
+enum PresenceStatus { ONLINE, IDLE, OFFLINE }
+enum ContentType { NOTES, MNEMONICS, PYQ, CHEAT_SHEET, MIND_MAP, MISTAKE_LOG }
+enum ContributorBadge { BRONZE, SILVER, GOLD, PLATINUM }
+```
+
+### New Types Needed
+
+```typescript
+// packages/types/src/entities/friend.types.ts [NEW]
+export interface FriendRequest {
+    _id: string;
+    senderId: string | User;
+    receiverId: string | User;
+    status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+    createdAt: string;
+    updatedAt: string;
+}
+
+export type RelationshipStatus = 
+    | { status: 'none' }
+    | { status: 'pending_sent'; requestId: string }
+    | { status: 'pending_received'; requestId: string }
+    | { status: 'friends' };
+
+// packages/types/src/websocket/friend-events.types.ts [NEW]
+export interface FriendRequestEvent {
+    requestId: string;
+    sender: { _id: string; username: string; fullName: string; profilePicture?: string };
+}
+
+export interface FriendRequestAcceptedEvent {
+    requestId: string;
+    acceptedBy: { _id: string; username: string; fullName: string; profilePicture?: string };
+}
+```
+
+---
+
+## 7. Redis Keys & Patterns (packages/config)
+
+### Existing Keys Used
+
+| Key Pattern | Type | TTL | Purpose |
+|-------------|------|-----|---------|
+| `online_users` | SET | ∞ | Set of all currently online userIds |
+| `user:{userId}:sockets` | SET | ∞ | Set of socket IDs for a user (multi-device) |
+| `socket:{socketId}:user` | STRING | ∞ | Maps socket ID → userId |
+| `room:{roomId}:users` | SET | — | Users currently in a study room (RoomCache) |
+| `room:{roomId}:occupancy` | STRING | — | Room occupancy count |
+| `room:{roomId}:timer` | JSON | 7200s | Timer state for a room |
+| `user:{userId}:presence` | STRING | — | Presence status (ONLINE/IDLE/OFFLINE) |
+| `user:{userId}:profile` | JSON | — | Cached user profile (UserCache) |
+| `refresh_token:{userId}` | STRING | TTL | Refresh token whitelist |
+| `blacklisted_token:{hash}` | BOOL | TTL | Blacklisted access tokens |
+
+### New Keys Needed for Friend Requests
+
+| Key Pattern | Type | TTL | Purpose |
+|-------------|------|-----|---------|
+| `user:{userId}:friend_request_count` | STRING | 300s | Cached count of pending incoming requests |
+| `friend_events:{channelName}` | PUB/SUB | — | Redis pub/sub channel for cross-service events |
+
+---
+
+## 8. Migration Considerations
+
+### 8.1 Follow Model Backward Compatibility
+
+The existing `Follow` model stays unchanged. Friend requests create Follow entries **only** upon acceptance. The existing `follow`/`unfollow` API endpoints at `/users/:id/follow` should either:
+- **Option A**: Be deprecated and replaced by the friend request flow entirely
+- **Option B**: Be kept for backward compatibility but hidden from UI (admin use)
+
+**Recommended**: Option A — Replace entirely. Update `UserController.follow` to throw `AppError('Use friend requests', 400)` or remove the route.
+
+### 8.2 Database Index for Existing Data
+
+If there's existing Follow data, it represents already-established friendships. No migration needed — those Follow entries remain valid.
+
+---
+
+## 9. File Inventory — All Files to Create/Modify
+
+### New Files
+
+| Path | Purpose |
+|------|---------|
+| `packages/database/src/models/FriendRequest.model.ts` | FriendRequest mongoose model |
+| `packages/types/src/entities/friend.types.ts` | FriendRequest & RelationshipStatus types |
+| `packages/types/src/websocket/friend-events.types.ts` | Friend request socket event types |
+| `apps/api/src/controllers/friend.controller.ts` | Friend request CRUD logic |
+| `apps/api/src/routes/friend.routes.ts` | Friend request REST routes |
+| `apps/web/src/lib/socket.ts` | Socket.io client connection manager |
+| `apps/web/src/stores/useChatStore.ts` | Chat state management (Zustand) |
+| `apps/web/src/stores/useFriendStore.ts` | Friend request state management (Zustand) |
+| `apps/web/src/services/chat.service.ts` | Chat-service HTTP client |
+| `apps/web/src/services/friend.service.ts` | Friend request HTTP client |
+| `apps/web/src/components/FriendRequestButton.tsx` | Smart relationship action button |
+| `apps/web/src/components/FriendRequestsList.tsx` | Incoming/outgoing request list |
+| `apps/web/src/hooks/useSocket.ts` | Custom hook for socket connection lifecycle |
+
+### Modified Files
+
+| Path | Changes |
+|------|---------|
+| `packages/database/src/models/index.ts` | Export FriendRequest model |
+| `packages/types/src/entities/index.ts` | Export friend types |
+| `packages/types/src/websocket/index.ts` | Export friend event types |
+| `packages/types/src/index.ts` | Re-export new types |
+| `apps/api/src/index.ts` | Mount friendRouter at `/api/v1/friends` |
+| `apps/web/src/pages/DMPage.tsx` | Wire to real socket + chat store, replace placeholders |
+| `apps/web/src/components/Sidebar.tsx` | Add friend request notification badge |
+| `apps/web/src/App.tsx` | Initialize socket on auth, add friends routes if needed |
+| `apps/chat-service/src/services/ChatService.ts` | Add friend validation to `startConversation` |
+
+---
+
+## 10. Environment Variables
+
+### Chat-Service (`apps/chat-service/.env`)
+```env
+CHAT_SERVICE_PORT=3002
+CORS_ORIGIN=http://localhost:5173
+MONGODB_URI=mongodb://localhost:27017/studymate
+REDIS_URL=redis://localhost:6379
+JWT_ACCESS_SECRET=<same as API>
+JWT_REFRESH_SECRET=<same as API>
+```
+
+### Frontend (`apps/web/.env`)
+```env
+VITE_CHAT_SERVICE_URL=http://localhost:3002
+VITE_CLERK_PUBLISHABLE_KEY=<clerk key>
+```
+
+---
+
+## 11. Critical Implementation Notes
+
+1. **Auth token mismatch**: The API uses Clerk tokens, but the chat-service uses custom JWT from `@studymate/auth`. The frontend needs to obtain the correct token type for socket connections. Either update the chat-service to accept Clerk tokens, or implement a token exchange endpoint.
+
+2. **Two Socket.io servers**: `apps/websocket` (room features) and `apps/chat-service` (DM chat) run separately. The frontend may need to connect to **both** — one for study rooms, one for DMs.
+
+3. **Redis presence is global**: The `online_users` set in Redis is shared. Both servers can read it, but writes should be coordinated to avoid inconsistency.
+
+4. **Message ordering**: Use `createdAt` timestamps from MongoDB. For real-time, Socket.io events include a `timestamp` or the full Message document with `createdAt`.
+
+5. **Cross-service events**: For friend request notifications (triggered by API, delivered by chat-service socket), use Redis Pub/Sub as an event bus between services.
+
+6. **Vite proxy**: The frontend uses `/api/v1` which is proxied to the API server. Socket.io connections to the chat-service need a direct URL, not proxied.

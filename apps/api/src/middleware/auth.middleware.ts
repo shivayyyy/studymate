@@ -1,43 +1,72 @@
 import type { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken, type TokenPayload } from '@studymate/auth';
-import { CacheManager } from '@studymate/cache';
-import { RedisKeys } from '@studymate/config';
-import { createHash } from 'crypto';
+import { getAuth } from '@clerk/express';
+import { User } from '@studymate/database';
 
 declare global {
     namespace Express {
         interface Request {
-            user?: TokenPayload;
+            user?: {
+                userId: string;
+                email: string;
+                username: string;
+            };
         }
     }
 }
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ success: false, message: 'Access token required' });
-        return;
-    }
-
-    const token = authHeader.split(' ')[1];
-
     try {
-        const decoded = verifyAccessToken(token);
+        // Use Clerk's getAuth to verify the JWT
+        const { userId: clerkUserId } = getAuth(req);
 
-        // Check if token is blacklisted
-        const tokenHash = createHash('sha256').update(token).digest('hex');
-        const isBlacklisted = await CacheManager.get(RedisKeys.blacklistedToken(tokenHash));
-        if (isBlacklisted) {
-            res.status(401).json({ success: false, message: 'Token has been revoked' });
+        if (!clerkUserId) {
+            res.status(401).json({ success: false, message: 'Authentication required' });
             return;
         }
 
-        req.user = decoded;
+        // Look up the user in our database by clerkId
+        let user = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
+
+        if (!user) {
+            // Auto-provision: if no user exists with this clerkId, this is a new Clerk user
+            // We'll return 401 for now — the /auth/sync route will handle user creation
+            res.status(401).json({ success: false, message: 'User not found. Please complete profile setup.' });
+            return;
+        }
+
+        if (!user.isActive) {
+            res.status(401).json({ success: false, message: 'User account is inactive' });
+            return;
+        }
+
+        req.user = {
+            userId: user._id.toString(),
+            email: user.email,
+            username: user.username,
+        };
         next();
     } catch (error) {
-        res.status(401).json({ success: false, message: 'Invalid or expired access token' });
-        return;
+        console.error('Auth middleware error:', error);
+        res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
 };
 
+export const optionalAuthenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const { userId: clerkUserId } = getAuth(req);
+
+        if (clerkUserId) {
+            const user = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
+            if (user && user.isActive) {
+                req.user = {
+                    userId: user._id.toString(),
+                    email: user.email,
+                    username: user.username,
+                };
+            }
+        }
+    } catch (error) {
+        // Ignore error for optional auth
+    }
+    next();
+};

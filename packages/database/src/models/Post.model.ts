@@ -2,11 +2,13 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IPostDocument extends Document {
     userId: mongoose.Types.ObjectId;
-    title: string;
     description?: string;
-    contentType: 'NOTES' | 'MNEMONICS' | 'PYQ' | 'CHEAT_SHEET' | 'MIND_MAP' | 'MISTAKE_LOG';
-    fileUrl?: string;
+    fileUrl?: string; // Deprecated
+    fileUrls?: string[]; // New
     thumbnailUrl?: string;
+    authorName: string;
+    authorUsername: string;
+    authorProfilePicture?: string;
     examCategory: 'JEE' | 'NEET' | 'UPSC' | 'GATE';
     subject: string;
     tags: string[];
@@ -23,15 +25,13 @@ export interface IPostDocument extends Document {
 const PostSchema = new Schema<IPostDocument>(
     {
         userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-        title: { type: String, required: true, trim: true, maxlength: 200 },
-        description: { type: String, maxlength: 1000 },
-        contentType: {
-            type: String,
-            enum: ['NOTES', 'MNEMONICS', 'PYQ', 'CHEAT_SHEET', 'MIND_MAP', 'MISTAKE_LOG'],
-            required: true,
-        },
-        fileUrl: { type: String },
+        description: { type: String, maxlength: 1000, required: true }, // Verified description is required if title is optional? logic check
+        fileUrl: { type: String }, // Deprecated but kept for compat
+        fileUrls: [{ type: String }], // New array support
         thumbnailUrl: { type: String },
+        authorName: { type: String, required: true },
+        authorUsername: { type: String, required: true },
+        authorProfilePicture: { type: String },
         examCategory: {
             type: String,
             enum: ['JEE', 'NEET', 'UPSC', 'GATE'],
@@ -56,8 +56,10 @@ PostSchema.index({ createdAt: -1 });
 
 // Calculate engagement score before saving
 PostSchema.pre('save', function (next) {
-    this.engagementScore =
-        this.likesCount * 1 + this.commentsCount * 3 + this.savesCount * 5;
+    if (this.isModified('likesCount') || this.isModified('commentsCount') || this.isModified('savesCount')) {
+        this.engagementScore =
+            (this.likesCount || 0) * 1 + (this.commentsCount || 0) * 3 + (this.savesCount || 0) * 5;
+    }
     next();
 });
 

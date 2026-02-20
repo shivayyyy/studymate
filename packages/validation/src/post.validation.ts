@@ -1,12 +1,17 @@
 import { z } from 'zod';
 
 export const createPostSchema = z.object({
-    title: z.string().min(3, 'Title must be at least 3 characters').max(200),
+    title: z.string().trim().max(200).optional(),
     description: z.string().max(1000).optional(),
-    contentType: z.enum(['NOTES', 'MNEMONICS', 'PYQ', 'CHEAT_SHEET', 'MIND_MAP', 'MISTAKE_LOG']),
     examCategory: z.enum(['JEE', 'NEET', 'UPSC', 'GATE']),
-    subject: z.string().min(1, 'Subject is required'),
-    tags: z.array(z.string().max(30)).max(10).optional(),
+    subject: z.string().min(1),
+    tags: z.array(z.string()).optional(),
+    fileUrl: z.string().url().optional(),
+    fileUrls: z.array(z.string().url()).optional(),
+    thumbnailUrl: z.string().url().optional()
+}).refine(data => data.title || data.description, {
+    message: "Either title or description must be provided",
+    path: ["description"]
 });
 
 export const updatePostSchema = z.object({

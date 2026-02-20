@@ -63,9 +63,23 @@ export class SocketService {
                 multi.sAdd(`user:${userId}:sockets`, socketId);
                 multi.set(`socket:${socketId}:user`, userId);
                 await multi.exec();
+
+                // Broadcast online status to all connected clients
+                this._io.emit('user_online', { userId });
+                logger.debug(`Broadcasted user_online for ${userId}`);
             } catch (err) {
                 logger.error(`Error entering presence for ${userId}:`, err);
             }
+
+            // Allow clients to request the current online users list
+            socket.on('get_online_users', async () => {
+                try {
+                    const onlineUserIds = await redis.sMembers('online_users');
+                    socket.emit('online_users_list', onlineUserIds);
+                } catch (err) {
+                    logger.error('Error fetching online users:', err);
+                }
+            });
 
             // 3. Message Delivery and Read Receipts (with DB Status Updates)
             socket.on('mark_read', async (data: { conversationId: string, messageIds: string[] }) => {
@@ -186,6 +200,9 @@ export class SocketService {
                     const remainingSockets = await redis.sCard(`user:${userId}:sockets`);
                     if (remainingSockets === 0) {
                         await redis.sRem('online_users', userId);
+                        // Broadcast offline status only when ALL sockets are gone
+                        this._io.emit('user_offline', { userId });
+                        logger.debug(`Broadcasted user_offline for ${userId}`);
                     }
                 } catch (err) {
                     logger.error(`Error clearing presence for ${userId}:`, err);

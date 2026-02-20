@@ -1,119 +1,194 @@
 import {
-    BookOpen, Edit2, Verified, Grid, Bookmark, UserSquare,
-    Heart, MessageCircle, Share2, FileText, File, BarChart2, FolderOutput,
-    Mail, Lightbulb
+    Grid, Bookmark, UserSquare, Loader2, LogOut,
+    BadgeCheck as Verified, Edit2, Mail, BookOpen
 } from 'lucide-react';
-
-// Interfaces matching Database Schema
-interface UserProfile {
-    _id: string;
-    fullName: string;
-    username: string;
-    profilePicture: string;
-    email: string;
-    bio: string;
-    examCategory: 'JEE' | 'NEET' | 'UPSC' | 'GATE';
-    subjects: string[];
-    targetYear: number;
-    followersCount: number;
-    followingCount: number;
-    postsCount: number;
-    isVerified: boolean;
-    totalStudyHours: number;
-    currentStreak: number;
-    contributorBadge: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM';
-}
-
-interface Post {
-    _id: string;
-    userId: string;
-    contentType: 'NOTES' | 'MNEMONICS' | 'PYQ' | 'CHEAT_SHEET' | 'MIND_MAP' | 'MISTAKE_LOG';
-    thumbnailUrl?: string; // If image/video
-    likesCount: number;
-    commentsCount: number;
-}
-
-// Mock Data based on Schema
-const mockUser: UserProfile = {
-    _id: "u123",
-    fullName: "Shivam Mishra",
-    username: "shivam_mishra",
-    profilePicture: "https://lh3.googleusercontent.com/aida-public/AB6AXuD06ZcjRbTekx_SQNethBTSMPaCkJtaz-FocGuvpQwaVNMDpVI6G-05gWJU0lGUkr8j0YdM40J6YaTAxq2ZY6Nw05_iajlYD-Eo7cfnhxwWlbtyD2FH8R3dUS0Lkn10r0dVMIQfNHDbfgHk0ZpSYbdt9JxBnML9_OMliscPgRnF4S_xlPBopwgJ63o-Eu4BRA-5CeDebYNuoeJXyWOI0sIxlWGOdUfv5wuadpUmbMtpwrEjJdtKTirJ73-qqe2hpysMVuRRlPZ7G23-",
-    email: "shivam@example.com",
-    bio: "Computer Science Undergraduate | Aspiring Data Scientist | GATE 2025 Aspirant",
-    examCategory: "GATE",
-    subjects: ["Data Science", "Algorithms", "DBMS"],
-    targetYear: 2025,
-    followersCount: 142,
-    followingCount: 89,
-    postsCount: 12,
-    isVerified: true,
-    totalStudyHours: 84.5,
-    currentStreak: 12,
-    contributorBadge: 'BRONZE'
-};
-
-const mockPosts: Post[] = [
-    { _id: "p1", userId: "u123", contentType: "NOTES", thumbnailUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuALhn6HZSbcVW0YlLRoVw7eYPmP14NOyOILdNOo-i2kXO_HERemtR0aXn6kLNayicF5kgTPeOObNIlEWXR1Qyn4_KesFIg26mzakImPCH11CDM68608ejoNWDL-rWF7iR_X_0JLYKdaYRCb5nb6I5SXSd5V2x0QFKuXULVr-XIB07EnJIjSF670sTPXM7yf_Cx_gWLvZeNGeSyaQDs1A452daED8PDZ2RItDDL2o7bB98xY1GJSfhNLwrNFVEGVPAphSzQvNWH6cQ2H", likesCount: 24, commentsCount: 8 },
-    { _id: "p2", userId: "u123", contentType: "MIND_MAP", likesCount: 45, commentsCount: 12 },
-    { _id: "p3", userId: "u123", contentType: "CHEAT_SHEET", likesCount: 18, commentsCount: 3 },
-    { _id: "p4", userId: "u123", contentType: "PYQ", likesCount: 67, commentsCount: 21 },
-    { _id: "p5", userId: "u123", contentType: "MISTAKE_LOG", likesCount: 31, commentsCount: 5 },
-    { _id: "p6", userId: "u123", contentType: "MNEMONICS", likesCount: 92, commentsCount: 14 },
-];
+import { useUserStore } from '../stores/useUserStore';
+import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { api } from '../lib/axios';
+import { useClerk } from '@clerk/clerk-react';
+import PostCard, { Post } from '../components/PostCard'; // Keep for Grid view if needed, or replace.
+import FeedPost from '../components/FeedPost';
 
 export default function ProfilePage() {
+    const { user, updateUser, logout } = useUserStore();
+    const navigate = useNavigate();
+    const { signOut } = useClerk();
+
+    const [loading, setLoading] = useState(true);
+
+    // Tab State
+    const [activeTab, setActiveTab] = useState<'posts' | 'saved' | 'tagged'>('posts');
+    const [content, setContent] = useState<Post[]>([]);
+    const [loadingContent, setLoadingContent] = useState(false);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const LIMIT = 10;
+
+    // Fetch User Profile
+    useEffect(() => {
+        const fetchProfile = async () => {
+            if (user) {
+                // If we already have the user, we can just set it and stop loading
+                // This prevents a redundant call that might fail if auth is flaky
+
+                setLoading(false);
+                return;
+            }
+
+            try {
+                // For now, fetch 'me'. Later support /users/:id
+                const response = await api.get('/users/me');
+                if (response.data.success) {
+
+                    // Also update store if it's the current user
+                    updateUser(response.data.data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch profile", error);
+                // If 401, the interceptor will handle it.
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchProfile();
+    }, [user, updateUser]); // Add dependencies
+
+    // Fetch Content (Posts/Saved)
+    const fetchContent = useCallback(async (reset = false) => {
+        if (!user?._id) return;
+        // Prevent fetching for tagged for now
+        if (activeTab === 'tagged') {
+            setContent([]);
+            setHasMore(false);
+            return;
+        }
+
+        try {
+            setLoadingContent(true);
+            const currentPage = reset ? 1 : page;
+            const endpoint = activeTab === 'saved' ? `/users/${user._id}/saved` : `/users/${user._id}/posts`;
+
+            const response = await api.get(endpoint, {
+                params: { page: currentPage, limit: LIMIT }
+            });
+
+            if (response.data.success) {
+                const newItems = response.data.data;
+
+                if (activeTab === 'saved') {
+                    // Saved items are wrapped, we need to map to post
+                    const mappedPosts = newItems.map((item: any) => ({
+                        ...item.postId, // Spread the populated post
+                        _id: item.postId._id // Ensure ID is correct
+                    }));
+                    setContent(prev => reset ? mappedPosts : [...prev, ...mappedPosts]);
+                } else {
+                    setContent(prev => reset ? newItems : [...prev, ...newItems]);
+                }
+
+                setHasMore(newItems.length === LIMIT);
+                if (!reset) setPage(prev => prev + 1);
+            }
+        } catch (error) {
+            console.error(`Failed to fetch ${activeTab}`, error);
+        } finally {
+            setLoadingContent(false);
+        }
+    }, [activeTab, user?._id, page]);
+
+    // Initial Fetch when tab changes or user loads
+    useEffect(() => {
+        if (user?._id) {
+            setPage(1);
+            setHasMore(true);
+            setContent([]);
+            fetchContent(true);
+        }
+    }, [activeTab, user?._id]);
+
+    if (loading) {
+        return (
+            <div className="flex h-screen items-center justify-center">
+                <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+            </div>
+        );
+    }
+
+    if (!user) {
+        return (
+            <div className="flex h-screen items-center justify-center flex-col gap-4">
+                <p className="text-slate-500">User not found.</p>
+                <button onClick={() => navigate('/login')} className="text-blue-600 font-bold hover:underline">Go to Login</button>
+            </div>
+        );
+    }
+
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 font-sans text-slate-900">
             <div className="flex flex-col lg:flex-row gap-8">
                 {/* Left Column: Profile & Stats */}
                 <aside className="w-full lg:w-1/3 flex flex-col gap-6">
                     {/* Profile Header */}
-                    <div className="bg-white border border-slate-200 rounded-xl p-8 flex flex-col items-center text-center shadow-sm">
+                    <div className="bg-white border border-slate-200 rounded-xl p-8 flex flex-col items-center text-center shadow-sm relative">
+                        {/* Logout Button */}
+                        <button
+                            onClick={async () => {
+                                logout();
+                                await signOut();
+                                navigate('/login');
+                            }}
+                            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
+                            title="Logout"
+                        >
+                            <LogOut size={20} />
+                        </button>
+
                         <div className="relative group">
-                            <img alt={mockUser.fullName} className="w-[120px] h-[120px] rounded-full object-cover border-4 border-white shadow-lg" src={mockUser.profilePicture} />
-                            {/* Contributor Badge Overlay */}
-                            <div className={`absolute -bottom-2 -right-2 border-4 border-white rounded-full flex items-center justify-center
-                                ${mockUser.contributorBadge === 'PLATINUM' ? 'w-10 h-10 bg-linear-to-tr from-slate-300 to-cyan-400 shadow-lg shadow-cyan-500/50' :
-                                    mockUser.contributorBadge === 'GOLD' ? 'w-9 h-9 bg-yellow-400 shadow-lg shadow-yellow-500/50' :
-                                        mockUser.contributorBadge === 'SILVER' ? 'w-8 h-8 bg-slate-300 shadow-md shadow-slate-400/50' :
-                                            'w-7 h-7 bg-amber-700 shadow-sm'
-                                }
-                            `} title={`${mockUser.contributorBadge} Contributor`}>
-                                {mockUser.contributorBadge === 'PLATINUM' && <span className="text-white text-lg drop-shadow-md">👑</span>}
-                                {mockUser.contributorBadge === 'GOLD' && <span className="text-white text-base drop-shadow-md">⭐</span>}
-                                {mockUser.contributorBadge === 'SILVER' && <span className="text-slate-600 text-sm font-bold">S</span>}
-                                {mockUser.contributorBadge === 'BRONZE' && <span className="text-amber-100 text-xs font-bold">B</span>}
-                            </div>
+                            <img
+                                alt={user.fullName}
+                                className="w-[120px] h-[120px] rounded-full object-cover border-4 border-white shadow-lg bg-gray-200"
+                                src={user.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.fullName)}&background=random`}
+                            />
+                            {user.isVerified && (
+                                <div className={`absolute -bottom-2 -right-2 border-4 border-white rounded-full flex items-center justify-center w-8 h-8 bg-blue-500 shadow-md`}>
+                                    <Verified className="w-4 h-4 text-white" />
+                                </div>
+                            )}
                         </div>
 
                         <div className="mt-4 flex flex-col items-center">
                             <div className="flex items-center gap-1.5">
-                                <h1 className="text-2xl font-bold text-slate-900">{mockUser.fullName}</h1>
-                                {mockUser.isVerified && <Verified className="text-blue-500 w-5 h-5" fill="currentColor" stroke="white" />}
+                                <h1 className="text-2xl font-bold text-slate-900">{user.fullName}</h1>
+                                {user.isVerified && <Verified className="text-blue-500 w-5 h-5" fill="currentColor" stroke="white" />}
                             </div>
-                            <span className="text-slate-500 font-medium text-sm">@{mockUser.username}</span>
+                            <span className="text-slate-500 font-medium text-sm">@{user.username}</span>
                         </div>
 
-                        {/* Bio directly from DB */}
-                        <p className="text-slate-500 mt-2 font-medium text-sm leading-relaxed px-4">{mockUser.bio}</p>
+                        <p className="text-slate-500 mt-2 font-medium text-sm leading-relaxed px-4">{(user as any).bio || "No bio yet."}</p>
 
                         <div className="mt-4 flex items-center gap-6 text-sm font-medium text-slate-600">
-                            <div><span className="font-bold text-slate-900">{mockUser.postsCount}</span> Posts</div>
-                            <div><span className="font-bold text-slate-900">{mockUser.followersCount}</span> Followers</div>
-                            <div><span className="font-bold text-slate-900">{mockUser.followingCount}</span> Following</div>
+                            <div><span className="font-bold text-slate-900">{(user as any).postsCount || 0}</span> Posts</div>
+                            <div><span className="font-bold text-slate-900">{(user as any).followersCount || 0}</span> Followers</div>
+                            <div><span className="font-bold text-slate-900">{(user as any).followingCount || 0}</span> Following</div>
                         </div>
 
-                        {/* Exam & Subjects mapped from DB */}
                         <div className="mt-4 flex flex-wrap justify-center gap-2">
-                            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold border border-blue-100">{mockUser.examCategory} {mockUser.targetYear}</span>
-                            {mockUser.subjects.map(subject => (
+                            {user.examCategory && (
+                                <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold border border-blue-100">
+                                    {user.examCategory} {user.targetYear}
+                                </span>
+                            )}
+                            {user.subjects?.map(subject => (
                                 <span key={subject} className="px-3 py-1 bg-slate-50 text-slate-600 rounded-full text-xs font-semibold border border-slate-200">{subject}</span>
                             ))}
                         </div>
 
                         <div className="mt-6 flex w-full gap-2">
-                            <button className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm shadow-blue-500/20">
+                            <button
+                                onClick={() => navigate('/profile-setup')}
+                                className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm shadow-blue-500/20"
+                            >
                                 <Edit2 className="w-4 h-4" />
                                 Edit Profile
                             </button>
@@ -124,7 +199,7 @@ export default function ProfilePage() {
                         </div>
                     </div>
 
-                    {/* Stats Overview - Directly matching User Model fields */}
+                    {/* Stats Overview */}
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                         <div className="p-4 border-b border-slate-100">
                             <h2 className="font-bold text-slate-800">Study Stats</h2>
@@ -137,10 +212,10 @@ export default function ProfilePage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-slate-500">Current Streak</p>
-                                        <p className="text-lg font-bold text-slate-900">{mockUser.currentStreak} Days</p>
+                                        <p className="text-lg font-bold text-slate-900">{(user as any).currentStreak || 0} Days</p>
                                     </div>
                                 </div>
-                                <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded">Active</span>
+                                {(user as any).currentStreak > 0 && <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded">Active</span>}
                             </div>
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-4">
@@ -149,21 +224,23 @@ export default function ProfilePage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-slate-500">Total Studied</p>
-                                        <p className="text-lg font-bold text-slate-900">{mockUser.totalStudyHours} Hours</p>
+                                        <p className="text-lg font-bold text-slate-900">{(user as any).totalStudyHours || 0} Hours</p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
-                                        <span className="text-xl">🏆</span>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">Badge</p>
-                                        <p className="text-lg font-bold text-slate-900">{mockUser.contributorBadge}</p>
+                            {(user as any).contributorBadge && (
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                                            <span className="text-xl">🏆</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-slate-500">Badge</p>
+                                            <p className="text-lg font-bold text-slate-900">{(user as any).contributorBadge}</p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </div>
                 </aside>
@@ -174,58 +251,75 @@ export default function ProfilePage() {
                         {/* Tab Headers */}
                         <div className="px-6 border-b border-slate-200">
                             <div className="flex justify-center gap-12">
-                                <button className="py-4 border-t-2 border-slate-900 -mt-px text-slate-900 font-bold text-xs tracking-widest flex items-center gap-2">
+                                <button
+                                    onClick={() => setActiveTab('posts')}
+                                    className={`py-4 border-t-2 -mt-px text-xs font-bold tracking-widest flex items-center gap-2 transition-colors ${activeTab === 'posts' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-700'
+                                        }`}
+                                >
                                     <Grid className="w-[18px] h-[18px]" />
                                     POSTS
                                 </button>
-                                <button className="py-4 border-t-2 border-transparent -mt-px text-slate-400 hover:text-slate-700 font-bold text-xs tracking-widest flex items-center gap-2 transition-colors">
+                                <button
+                                    onClick={() => setActiveTab('saved')}
+                                    className={`py-4 border-t-2 -mt-px text-xs font-bold tracking-widest flex items-center gap-2 transition-colors ${activeTab === 'saved' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-700'
+                                        }`}
+                                >
                                     <Bookmark className="w-[18px] h-[18px]" />
                                     SAVED
                                 </button>
-                                <button className="py-4 border-t-2 border-transparent -mt-px text-slate-400 hover:text-slate-700 font-bold text-xs tracking-widest flex items-center gap-2 transition-colors">
+                                <button
+                                    onClick={() => setActiveTab('tagged')}
+                                    className={`py-4 border-t-2 -mt-px text-xs font-bold tracking-widest flex items-center gap-2 transition-colors ${activeTab === 'tagged' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-700'
+                                        }`}
+                                >
                                     <UserSquare className="w-[18px] h-[18px]" />
                                     TAGGED
                                 </button>
                             </div>
                         </div>
 
-                        {/* Grid Content */}
-                        <div className="p-6 flex-1">
-                            <div className="grid grid-cols-3 gap-1 md:gap-4 lg:gap-6">
-                                {mockPosts.map((post) => (
-                                    <div key={post._id} className="relative aspect-square bg-slate-100 rounded-sm overflow-hidden group cursor-pointer border border-slate-200">
-                                        {post.thumbnailUrl ? (
-                                            <img alt={post.contentType} className="w-full h-full object-cover" src={post.thumbnailUrl} />
+                        {/* Content Area */}
+                        <div className="flex-1 flex flex-col">
+                            {content.length > 0 ? (
+                                <div className={activeTab === 'posts' || activeTab === 'saved' ? "divide-y divide-slate-100" : "p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6"}>
+                                    {content.map((post) => (
+                                        (activeTab === 'posts' || activeTab === 'saved') ? (
+                                            <FeedPost key={post._id} post={post as any} />
                                         ) : (
-                                            <div className={`w-full h-full flex items-center justify-center ${post.contentType === 'NOTES' ? 'bg-slate-50' :
-                                                post.contentType === 'MIND_MAP' ? 'bg-blue-50' :
-                                                    post.contentType === 'PYQ' ? 'bg-red-50' :
-                                                        post.contentType === 'CHEAT_SHEET' ? 'bg-purple-50' :
-                                                            'bg-green-50'
-                                                }`}>
-                                                {/* Dynamic Icon based on Content Type */}
-                                                {post.contentType === 'NOTES' && <FileText className="w-10 h-10 text-slate-300" />}
-                                                {post.contentType === 'MIND_MAP' && <Share2 className="w-10 h-10 text-blue-300" />}
-                                                {post.contentType === 'PYQ' && <File className="w-10 h-10 text-red-300" />}
-                                                {post.contentType === 'CHEAT_SHEET' && <FolderOutput className="w-10 h-10 text-purple-300" />}
-                                                {post.contentType === 'MISTAKE_LOG' && <BarChart2 className="w-10 h-10 text-green-300" />}
-                                                {post.contentType === 'MNEMONICS' && <Lightbulb className="w-10 h-10 text-amber-300" />}
-                                            </div>
-                                        )}
-
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-6 text-white font-bold">
-                                            <div className="flex items-center gap-1.5">
-                                                <Heart className="w-5 h-5 fill-white" />
-                                                <span>{post.likesCount}</span>
-                                            </div>
-                                            <div className="flex items-center gap-1.5">
-                                                <MessageCircle className="w-5 h-5 fill-white" />
-                                                <span>{post.commentsCount}</span>
-                                            </div>
+                                            <PostCard key={post._id} post={post} onClick={() => console.log('Open Post', post._id)} />
+                                        )
+                                    ))}
+                                </div>
+                            ) : (
+                                !loadingContent && (
+                                    <div className="flex flex-col items-center justify-center h-64 text-slate-400 p-6">
+                                        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                                            {activeTab === 'posts' && <Grid className="w-8 h-8 opacity-50" />}
+                                            {activeTab === 'saved' && <Bookmark className="w-8 h-8 opacity-50" />}
+                                            {activeTab === 'tagged' && <UserSquare className="w-8 h-8 opacity-50" />}
                                         </div>
+                                        <p className="font-medium">No results for {activeTab}</p>
                                     </div>
-                                ))}
-                            </div>
+                                )
+                            )}
+
+                            {/* Loading State / Load More */}
+                            {loadingContent && (
+                                <div className="py-8 flex justify-center">
+                                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                                </div>
+                            )}
+
+                            {!loadingContent && hasMore && content.length > 0 && (
+                                <div className="py-6 flex justify-center">
+                                    <button
+                                        onClick={() => fetchContent(false)}
+                                        className="px-6 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                                    >
+                                        Load More
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </section>

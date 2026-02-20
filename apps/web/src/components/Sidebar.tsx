@@ -1,15 +1,39 @@
+import { LayoutGrid, Users, BarChart2, Medal, Settings, Mail, MessageCircle, Bell, User } from 'lucide-react';
+import { useUserStore } from '../stores/useUserStore';
+import { useFriendStore } from '../stores/useFriendStore';
+import { useChatStore } from '../stores/useChatStore';
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, Users, BarChart2, Medal, Settings, Mail, MessageCircle, Bell } from 'lucide-react';
+import { useEffect } from 'react';
 
 const navItems = [
     { to: '/feed', icon: LayoutGrid, label: 'Feed' },
     { to: '/rooms', icon: Users, label: 'Rooms' },
     { to: '/analytics', icon: BarChart2, label: 'Analytics' },
-    { to: '/dms', icon: window.matchMedia('(prefers-color-scheme: dark)').matches ? Mail : MessageCircle, label: 'Messages' }, // Using conditional icon just for example, but better to stick to one. Let's use MessageCircle for consistency with other line icons.
+    { to: '/dms', icon: window.matchMedia('(prefers-color-scheme: dark)').matches ? Mail : MessageCircle, label: 'Messages' },
     { to: '/profile', icon: Medal, label: 'Profile' },
 ];
 
 export default function Sidebar() {
+    const { user } = useUserStore();
+    const { incomingCount, fetchIncoming } = useFriendStore();
+    const { conversations, fetchConversations } = useChatStore();
+
+    useEffect(() => {
+        fetchIncoming();
+        // We also fetch conversations here so the unread badge is accurate globally
+        fetchConversations();
+
+        // Polling for updates
+        const interval = setInterval(() => {
+            fetchIncoming();
+            fetchConversations();
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [fetchIncoming, fetchConversations]);
+
+    const totalUnreadMessages = conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+    const totalBadgeCount = incomingCount + totalUnreadMessages;
+
     return (
         <aside className="sticky top-0 h-screen w-20 bg-white border-r border-slate-200 flex flex-col items-center py-6 z-50">
             {/* Logo */}
@@ -32,7 +56,14 @@ export default function Sidebar() {
                     >
                         {({ isActive }) => (
                             <>
-                                <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                                <div className="relative">
+                                    <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                                    {item.label === 'Messages' && totalBadgeCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white">
+                                            {totalBadgeCount > 9 ? '9+' : totalBadgeCount}
+                                        </span>
+                                    )}
+                                </div>
                                 {isActive && (
                                     <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-600 rounded-r-full" />
                                 )}
@@ -56,13 +87,19 @@ export default function Sidebar() {
                 <button className="p-3 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl flex justify-center transition-colors">
                     <Settings size={24} />
                 </button>
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 p-0.5 mx-auto cursor-pointer hover:scale-105 transition-transform relative">
-                    <img
-                        src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
-                        alt="Profile"
-                        className="w-full h-full rounded-full bg-white object-cover"
-                    />
-                    <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>
+                <div className="w-10 h-10 rounded-full bg-linear-to-tr from-blue-500 to-indigo-600 p-0.5 mx-auto cursor-pointer hover:scale-105 transition-transform relative group">
+                    {user ? (
+                        <img
+                            src={user.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.fullName)}&background=random`}
+                            alt="Profile"
+                            className="w-full h-full rounded-full bg-white object-cover"
+                        />
+                    ) : (
+                        <div className="w-full h-full rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                            <User size={20} />
+                        </div>
+                    )}
+                    {user && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>}
                 </div>
             </div>
         </aside>

@@ -1,0 +1,1081 @@
+# Instagram-Like Real-Time Chat Architecture with Kafka
+
+> A complete, step-by-step guide to evolving StudyMate's chat system from a direct Socket.IO + MongoDB architecture to a **Kafka-powered, event-driven, Instagram-like messaging platform** with seen receipts, typing indicators, presence, and real-time badge counts.
+
+---
+
+## Table of Contents
+
+1. [Current Architecture (As-Is)](#1-current-architecture-as-is)
+2. [Target Architecture (To-Be)](#2-target-architecture-to-be)
+3. [Kafka Topic Design](#3-kafka-topic-design)
+4. [Step-by-Step Implementation](#4-step-by-step-implementation)
+   - Step 1: Install & Configure Kafka
+   - Step 2: Create `@studymate/kafka` Package
+   - Step 3: Add Kafka Topics
+   - Step 4: Refactor Message Sending (Producer)
+   - Step 5: Build `message-processor` Worker (Consumer)
+   - Step 6: Presence System via Kafka
+   - Step 7: Typing Indicators via Kafka
+   - Step 8: Read Receipts via Kafka
+   - Step 9: Unread Count & Badge System
+   - Step 10: Frontend Integration
+5. [Data Flow Diagrams](#5-data-flow-diagrams)
+6. [Schema Changes](#6-schema-changes)
+7. [Scaling & Production](#7-scaling--production)
+
+---
+
+## 1. Current Architecture (As-Is)
+
+```mermaid
+graph TD
+    subgraph Frontend["Frontend (React + Zustand)"]
+        A[DMPage.tsx] --> B[useChatStore.ts]
+        B --> C[socketClient - socket.io-client]
+        B --> D[ChatService - axios HTTP]
+    end
+
+    subgraph ChatService["Chat Service (Express + Socket.IO)"]
+        E[chat.controller.ts] --> F[ChatService.ts]
+        F --> G[(MongoDB)]
+        F --> H[SocketService.ts]
+        H --> I[Socket.IO Server]
+        I --> J[(Redis - Presence + Adapter)]
+    end
+
+    C <-->|WebSocket| I
+    D -->|HTTP REST| E
+```
+
+### Current Pain Points
+
+| Component | Issue |
+|---|---|
+| **Message sending** | Synchronous: HTTP → DB write → Socket emit — all in one request |
+| **Presence** | Redis `SADD/SREM` per socket, works but doesn't scale to millions |
+| **Typing indicators** | Ephemeral socket events — lost if the target user is temporarily disconnected |
+| **Read receipts** | `socket.to()` excludes sender — requires optimistic local updates |
+| **Unread counts** | Computed client-side from `conversations[]` — no persistent server-side tracking |
+| **Scalability** | Single chat-service instance handles everything |
+
+### Key Files in Current Architecture
+
+| File | Role |
+|---|---|
+| [ChatService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/ChatService.ts) | DB writes + socket emit for messages |
+| [SocketService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/SocketService.ts) | Socket.IO server, presence, mark_read, typing |
+| [useChatStore.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/stores/useChatStore.ts) | Frontend Zustand store for messages, conversations, presence |
+| [socket.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/lib/socket.ts) | Socket.IO client wrapper |
+| [Message.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Message.model.ts) | Message schema (status: sent/delivered/read) |
+| [Conversation.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Conversation.model.ts) | Conversation schema (participants, lastMessage) |
+
+---
+
+## 2. Target Architecture (To-Be)
+
+```mermaid
+graph TD
+    subgraph Frontend["Frontend (React + Zustand)"]
+        A[DMPage.tsx] --> B[useChatStore.ts]
+        B --> C[Socket.IO Client]
+        B --> D[ChatService HTTP]
+    end
+
+    subgraph Gateway["Gateway Layer"]
+        E[API Gateway] --> F[Chat REST API]
+        G[Socket.IO Server] --> H[Kafka Producer]
+    end
+
+    subgraph Kafka["Apache Kafka"]
+        I[chat.messages]
+        K[chat.presence]
+        L[chat.typing]
+        M[chat.receipts]
+    end
+
+    subgraph Workers["Consumer Workers"]
+        N[Message Processor]
+        O[Presence Processor]
+        P[Typing Processor]
+        Q[Receipt Processor]
+    end
+
+    subgraph Storage["Storage"]
+        R[(MongoDB)]
+        S[(Redis - Cache + Presence)]
+    end
+
+    C <-->|WebSocket| G
+    D -->|HTTP| F
+    F --> H
+    H --> I & K & L & M
+    I --> N
+    K --> O
+    L --> P
+    M --> Q
+    N --> R
+    N --> G
+    O --> S
+    O --> G
+    P --> G
+    Q --> R
+    Q --> G
+```
+
+### What Changes
+
+| Feature | Before | After (Kafka) |
+|---|---|---|
+| **Send message** | HTTP → DB → Socket emit (sync) | HTTP → Kafka produce (async) → Consumer: DB + Socket emit |
+| **Presence** | Socket connect/disconnect → Redis | Socket → Kafka `chat.presence` → Consumer: Redis + broadcast |
+| **Typing** | Socket → immediate broadcast | Socket → Kafka `chat.typing` → Consumer: broadcast |
+| **Read receipts** | Socket `mark_read` → DB + broadcast | Socket → Kafka `chat.receipts` → Consumer: DB + broadcast |
+| **Unread count** | Client-side computation | Server-side in [Conversation](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/services/chat.service.ts#17-25) document + Kafka consumer updates |
+
+---
+
+## 3. Kafka Topic Design
+
+| Topic Name | Partitioning Key | Retention | Purpose |
+|---|---|---|---|
+| `chat.messages` | `conversationId` | 7 days | New messages to persist & deliver |
+| `chat.receipts` | `conversationId` | 1 day | Read/delivered receipt events |
+| `chat.typing` | `conversationId` | 1 hour | Typing start/stop (ephemeral) |
+| `chat.presence` | `userId` | 1 hour | Online/offline events |
+| `chat.notifications` | `userId` | 3 days | Push notifications, badges |
+
+### Why These Partitioning Keys?
+
+- **`conversationId`** for messages/receipts/typing: Ensures all events for one conversation go to the same partition → **ordered processing per conversation**
+- **`userId`** for presence/notifications: Ensures all presence events for one user go to the same partition → **consistent online/offline state**
+
+---
+
+## 4. Step-by-Step Implementation
+
+### Step 1: Install & Configure Kafka
+
+#### 1a. Add Kafka to Docker Compose
+
+Create or update `docker-compose.yml` in the project root:
+
+```yaml
+# docker-compose.yml
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168  # 7 days
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
+```
+
+#### 1b. Install KafkaJS
+
+```bash
+cd /home/shivam-mishra/webdev-learning/studymate
+bun add kafkajs --filter @studymate/kafka
+```
+
+---
+
+### Step 2: Create `@studymate/kafka` Shared Package
+
+#### [NEW] `packages/kafka/package.json`
+
+```json
+{
+  "name": "@studymate/kafka",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "@studymate/logger": "workspace:*"
+  }
+}
+```
+
+#### [NEW] `packages/kafka/src/client.ts`
+
+```typescript
+import { Kafka, logLevel } from 'kafkajs';
+import { createLogger } from '@studymate/logger';
+
+const logger = createLogger('kafka');
+
+const kafka = new Kafka({
+  clientId: process.env.KAFKA_CLIENT_ID || 'studymate',
+  brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
+  logLevel: logLevel.WARN,
+  retry: {
+    initialRetryTime: 300,
+    retries: 10,
+  },
+});
+
+export { kafka };
+```
+
+#### [NEW] `packages/kafka/src/producer.ts`
+
+```typescript
+import { kafka } from './client';
+import { createLogger } from '@studymate/logger';
+
+const logger = createLogger('kafka-producer');
+
+const producer = kafka.producer({
+  allowAutoTopicCreation: false,
+  idempotent: true,            // Exactly-once semantics
+  maxInFlightRequests: 5,
+  transactionTimeout: 30000,
+});
+
+let isConnected = false;
+
+export const connectProducer = async () => {
+  if (isConnected) return;
+  await producer.connect();
+  isConnected = true;
+  logger.info('Kafka producer connected');
+};
+
+export const disconnectProducer = async () => {
+  await producer.disconnect();
+  isConnected = false;
+};
+
+export interface KafkaEvent<T = any> {
+  topic: string;
+  key: string;       // Partitioning key
+  value: T;
+  headers?: Record<string, string>;
+}
+
+export const publishEvent = async <T>(event: KafkaEvent<T>): Promise<void> => {
+  await connectProducer();
+  await producer.send({
+    topic: event.topic,
+    messages: [{
+      key: event.key,
+      value: JSON.stringify(event.value),
+      headers: {
+        ...event.headers,
+        timestamp: Date.now().toString(),
+        source: 'studymate-chat',
+      },
+    }],
+  });
+};
+
+export { producer };
+```
+
+#### [NEW] `packages/kafka/src/consumer.ts`
+
+```typescript
+import { kafka } from './client';
+import { Consumer, EachMessagePayload } from 'kafkajs';
+import { createLogger } from '@studymate/logger';
+
+const logger = createLogger('kafka-consumer');
+
+export interface ConsumerConfig {
+  groupId: string;
+  topics: string[];
+  handler: (payload: EachMessagePayload) => Promise<void>;
+  fromBeginning?: boolean;
+}
+
+export const createConsumer = async (config: ConsumerConfig): Promise<Consumer> => {
+  const consumer = kafka.consumer({
+    groupId: config.groupId,
+    sessionTimeout: 30000,
+    heartbeatInterval: 3000,
+  });
+
+  await consumer.connect();
+  logger.info(`Consumer ${config.groupId} connected`);
+
+  for (const topic of config.topics) {
+    await consumer.subscribe({
+      topic,
+      fromBeginning: config.fromBeginning ?? false,
+    });
+    logger.info(`Consumer ${config.groupId} subscribed to ${topic}`);
+  }
+
+  await consumer.run({
+    autoCommit: true,
+    autoCommitInterval: 5000,
+    eachMessage: async (payload) => {
+      try {
+        await config.handler(payload);
+      } catch (error) {
+        logger.error(`Error processing message from ${payload.topic}:`, error);
+        // In production: send to dead-letter queue
+      }
+    },
+  });
+
+  return consumer;
+};
+```
+
+#### [NEW] `packages/kafka/src/topics.ts`
+
+```typescript
+import { kafka } from './client';
+import { createLogger } from '@studymate/logger';
+
+const logger = createLogger('kafka-topics');
+
+export const TOPICS = {
+  MESSAGES:       'chat.messages',
+  RECEIPTS:       'chat.receipts',
+  TYPING:         'chat.typing',
+  PRESENCE:       'chat.presence',
+  NOTIFICATIONS:  'chat.notifications',
+} as const;
+
+export const createTopics = async () => {
+  const admin = kafka.admin();
+  await admin.connect();
+
+  const existingTopics = await admin.listTopics();
+  const topicsToCreate = Object.values(TOPICS)
+    .filter(t => !existingTopics.includes(t))
+    .map(topic => ({
+      topic,
+      numPartitions: topic === TOPICS.PRESENCE ? 3 : 6,
+      replicationFactor: 1,  // Set to 3 in production
+      configEntries: [
+        {
+          name: 'retention.ms',
+          value: topic === TOPICS.TYPING
+            ? '3600000'           // 1 hour
+            : topic === TOPICS.RECEIPTS
+              ? '86400000'        // 1 day
+              : topic === TOPICS.PRESENCE
+                ? '3600000'       // 1 hour
+                : '604800000',    // 7 days
+        },
+      ],
+    }));
+
+  if (topicsToCreate.length > 0) {
+    await admin.createTopics({ topics: topicsToCreate });
+    logger.info(`Created topics: ${topicsToCreate.map(t => t.topic).join(', ')}`);
+  }
+
+  await admin.disconnect();
+};
+```
+
+#### [NEW] `packages/kafka/src/index.ts`
+
+```typescript
+export { kafka } from './client';
+export { connectProducer, disconnectProducer, publishEvent, type KafkaEvent } from './producer';
+export { createConsumer, type ConsumerConfig } from './consumer';
+export { TOPICS, createTopics } from './topics';
+```
+
+---
+
+### Step 3: Kafka Topic Initialization Script
+
+#### [NEW] `scripts/init-kafka.ts`
+
+```typescript
+import { createTopics } from '@studymate/kafka';
+
+async function main() {
+  console.log('Creating Kafka topics...');
+  await createTopics();
+  console.log('Done!');
+  process.exit(0);
+}
+
+main().catch(err => {
+  console.error('Failed to create topics:', err);
+  process.exit(1);
+});
+```
+
+Run after Docker Compose is up:
+
+```bash
+bun run scripts/init-kafka.ts
+```
+
+---
+
+### Step 4: Refactor Message Sending (Producer Side)
+
+#### [MODIFY] [apps/chat-service/src/services/ChatService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/ChatService.ts)
+
+The key change: instead of writing to MongoDB and emitting Socket.IO events **synchronously** in the HTTP request, we now **publish to Kafka** and return immediately. The consumer handles persistence and delivery.
+
+```diff
+ import { Conversation, Message, MessageStatus, MessageType } from '@studymate/database';
+-import { SocketService } from './SocketService';
++import { publishEvent, TOPICS } from '@studymate/kafka';
+ import { Types } from 'mongoose';
+ import { createLogger } from '@studymate/logger';
++import { randomUUID } from 'crypto';
+
+ export class ChatService {
+     static async sendMessage(senderId: string, text: string, options: {...}) {
+         const { conversationId, roomId, type = MessageType.TEXT } = options;
+         if (!conversationId && !roomId) throw new Error('...');
+
+-        // OLD: Synchronous DB write + socket emit
+-        const message = await Message.create({...});
+-        SocketService.io.to(`conversation:${conversationId}`).emit('new_message', message);
+
++        // NEW: Publish to Kafka — async, decoupled
++        const messageId = new Types.ObjectId().toString();
++        const event = {
++            messageId,
++            conversationId,
++            roomId,
++            senderId,
++            text,
++            messageType: type,
++            status: MessageStatus.SENT,
++            createdAt: new Date().toISOString(),
++        };
++
++        await publishEvent({
++            topic: TOPICS.MESSAGES,
++            key: conversationId || roomId!,
++            value: event,
++        });
++
++        // Return immediately with the pending message
++        return { _id: messageId, ...event };
+     }
+ }
+```
+
+> [!IMPORTANT]
+> The HTTP response now returns a **pending** message with a generated `_id`. The actual DB persistence happens asynchronously in the consumer. This gives the user the instantly-responsive feeling Instagram has.
+
+---
+
+### Step 5: Build Message Processor Worker (Consumer)
+
+#### [NEW] `apps/message-processor/src/index.ts`
+
+This is a new microservice that consumes from Kafka topics and handles persistence + real-time delivery.
+
+```typescript
+import { connectDB, Message, Conversation, MessageStatus } from '@studymate/database';
+import { connectRedis, getRedisClient } from '@studymate/cache';
+import { createConsumer, TOPICS, createTopics } from '@studymate/kafka';
+import { createLogger } from '@studymate/logger';
+import http from 'http';
+import { SocketService } from './services/SocketService';
+
+const logger = createLogger('message-processor');
+
+async function start() {
+  await connectDB(process.env.MONGO_URI);
+  await connectRedis();
+  await createTopics();
+
+  // Socket.IO server for delivering events to clients
+  const httpServer = http.createServer();
+  SocketService.init(httpServer);
+  httpServer.listen(process.env.WS_PORT || 3003);
+
+  // ─── Message Consumer ─────────────────────────────────────────────
+  await createConsumer({
+    groupId: 'message-processor',
+    topics: [TOPICS.MESSAGES],
+    handler: async ({ message: kafkaMsg }) => {
+      const event = JSON.parse(kafkaMsg.value!.toString());
+      logger.info(`Processing message ${event.messageId} in ${event.conversationId}`);
+
+      // 1. Persist to MongoDB
+      const message = await Message.create({
+        _id: event.messageId,
+        conversationId: event.conversationId,
+        roomId: event.roomId,
+        senderId: event.senderId,
+        text: event.text,
+        messageType: event.messageType,
+        status: MessageStatus.SENT,
+      });
+
+      // 2. Update conversation metadata
+      if (event.conversationId) {
+        await Conversation.findByIdAndUpdate(event.conversationId, {
+          lastMessage: message._id,
+          lastMessageAt: new Date(),
+          $inc: { [`unreadCounts.${event.senderId}`]: 0 },
+        });
+
+        // Increment unread for all OTHER participants
+        const conv = await Conversation.findById(event.conversationId);
+        if (conv) {
+          for (const participantId of conv.participants) {
+            if (participantId.toString() !== event.senderId) {
+              await Conversation.updateOne(
+                { _id: event.conversationId },
+                { $inc: { [`unreadCounts.${participantId}`]: 1 } }
+              );
+            }
+          }
+        }
+      }
+
+      // 3. Deliver via Socket.IO (real-time)
+      const target = event.conversationId
+        ? `conversation:${event.conversationId}`
+        : `room:${event.roomId}`;
+      SocketService.io.to(target).emit('new_message', message);
+
+      // 4. Send push notification to offline users
+      const redis = getRedisClient();
+      if (event.conversationId) {
+        const conv = await Conversation.findById(event.conversationId);
+        for (const pid of conv?.participants || []) {
+          const isOnline = await redis.sIsMember('online_users', pid.toString());
+          if (!isOnline && pid.toString() !== event.senderId) {
+            SocketService.io.to(`user:${pid}`).emit('notification', {
+              type: 'NEW_MESSAGE',
+              message,
+            });
+          }
+        }
+      }
+    },
+  });
+
+  // ─── Receipt Consumer ─────────────────────────────────────────────
+  await createConsumer({
+    groupId: 'receipt-processor',
+    topics: [TOPICS.RECEIPTS],
+    handler: async ({ message: kafkaMsg }) => {
+      const event = JSON.parse(kafkaMsg.value!.toString());
+
+      if (event.type === 'read') {
+        // 1. Update message status in DB
+        await Message.updateMany(
+          { _id: { $in: event.messageIds }, conversationId: event.conversationId },
+          { $set: { status: MessageStatus.READ } }
+        );
+
+        // 2. Reset unread count for this user
+        await Conversation.updateOne(
+          { _id: event.conversationId },
+          { $set: { [`unreadCounts.${event.userId}`]: 0 } }
+        );
+
+        // 3. Notify the sender(s) via Socket.IO
+        SocketService.io.to(`conversation:${event.conversationId}`).emit('message_read', {
+          conversationId: event.conversationId,
+          messageIds: event.messageIds,
+          readBy: event.userId,
+          at: new Date(),
+        });
+      }
+
+      if (event.type === 'delivered') {
+        await Message.updateMany(
+          {
+            _id: { $in: event.messageIds },
+            conversationId: event.conversationId,
+            status: MessageStatus.SENT,
+          },
+          { $set: { status: MessageStatus.DELIVERED } }
+        );
+
+        SocketService.io.to(`conversation:${event.conversationId}`).emit('message_delivered', {
+          conversationId: event.conversationId,
+          messageIds: event.messageIds,
+          deliveredTo: event.userId,
+          at: new Date(),
+        });
+      }
+    },
+  });
+
+  // ─── Presence Consumer ─────────────────────────────────────────────
+  await createConsumer({
+    groupId: 'presence-processor',
+    topics: [TOPICS.PRESENCE],
+    handler: async ({ message: kafkaMsg }) => {
+      const event = JSON.parse(kafkaMsg.value!.toString());
+      const redis = getRedisClient();
+
+      if (event.status === 'online') {
+        await redis.sAdd('online_users', event.userId);
+        await redis.set(`user:${event.userId}:last_seen`, Date.now().toString());
+        SocketService.io.emit('user_online', { userId: event.userId });
+      }
+
+      if (event.status === 'offline') {
+        await redis.sRem('online_users', event.userId);
+        await redis.set(`user:${event.userId}:last_seen`, Date.now().toString());
+        SocketService.io.emit('user_offline', {
+          userId: event.userId,
+          lastSeen: new Date(),
+        });
+      }
+    },
+  });
+
+  // ─── Typing Consumer ─────────────────────────────────────────────
+  await createConsumer({
+    groupId: 'typing-processor',
+    topics: [TOPICS.TYPING],
+    handler: async ({ message: kafkaMsg }) => {
+      const event = JSON.parse(kafkaMsg.value!.toString());
+
+      const target = event.conversationId
+        ? `conversation:${event.conversationId}`
+        : `room:${event.roomId}`;
+
+      SocketService.io.to(target).emit('typing', {
+        userId: event.userId,
+        conversationId: event.conversationId,
+        roomId: event.roomId,
+        isTyping: event.isTyping,
+      });
+    },
+  });
+
+  logger.info('All Kafka consumers started');
+}
+
+start().catch(err => {
+  logger.error('Failed to start message processor:', err);
+  process.exit(1);
+});
+```
+
+---
+
+### Step 6: Presence System via Kafka
+
+#### [MODIFY] [SocketService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/SocketService.ts) — Produce Presence Events
+
+```diff
+ this._io.on('connection', async (socket) => {
+     const userId = socket.user?.userId;
+     // ...
+     await socket.join(`user:${userId}`);
+
+-    // OLD: Direct Redis write
+-    await redis.sAdd('online_users', userId);
+-    this._io.emit('user_online', { userId });
+
++    // NEW: Publish presence to Kafka
++    await publishEvent({
++        topic: TOPICS.PRESENCE,
++        key: userId,
++        value: { userId, status: 'online', socketId: socket.id },
++    });
+
+     socket.on('disconnect', async () => {
+-        await redis.sRem('online_users', userId);
+-        this._io.emit('user_offline', { userId });
+
++        const remainingSockets = await redis.sCard(`user:${userId}:sockets`);
++        if (remainingSockets === 0) {
++            await publishEvent({
++                topic: TOPICS.PRESENCE,
++                key: userId,
++                value: { userId, status: 'offline', socketId: socket.id },
++            });
++        }
+     });
+ });
+```
+
+> **Instagram Pattern:** Instagram stores `last_seen` timestamp in Redis/Cassandra. The frontend shows "Active X minutes ago" based on this. The presence consumer above does `redis.set('user:X:last_seen', timestamp)` — same pattern.
+
+---
+
+### Step 7: Typing Indicators via Kafka
+
+#### [MODIFY] [SocketService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/SocketService.ts)
+
+```diff
+ socket.on('typing', (data) => {
+-    // OLD: Direct broadcast
+-    socket.to(`conversation:${data.conversationId}`).emit('typing', { ...data, userId });
+
++    // NEW: Publish to Kafka (lightweight, fire-and-forget)
++    publishEvent({
++        topic: TOPICS.TYPING,
++        key: data.conversationId || data.roomId!,
++        value: { userId, ...data, isTyping: true },
++    });
+ });
+```
+
+> **Why Kafka for typing?** In a multi-server deployment, socket events from Server A won't reach clients on Server B. Kafka acts as the universal event bus. The typing consumer broadcasts to ALL connected Socket.IO servers.
+
+---
+
+### Step 8: Read Receipts via Kafka
+
+#### [MODIFY] [SocketService.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/SocketService.ts)
+
+```diff
+ socket.on('mark_read', async (data) => {
+-    // OLD: Direct DB write + socket emit
+-    await Message.updateMany(...);
+-    socket.to(`conversation:${data.conversationId}`).emit('message_read', {...});
+
++    // NEW: Publish to Kafka — consumer handles DB + broadcast
++    await publishEvent({
++        topic: TOPICS.RECEIPTS,
++        key: data.conversationId,
++        value: {
++            type: 'read',
++            conversationId: data.conversationId,
++            messageIds: data.messageIds,
++            userId,
++        },
++    });
+ });
+```
+
+> **Instagram Pattern:** Instagram uses a "seen" indicator (single checkmark → double checkmark → blue double checkmark). The receipt pipeline:
+> 1. **SENT** (✓) — Message produced to Kafka
+> 2. **DELIVERED** (✓✓) — Consumer persisted + socket emitted
+> 3. **READ** (✓✓ blue) — Recipient opened chat → `mark_read` → Kafka → consumer broadcasts
+
+---
+
+### Step 9: Unread Count & Badge System
+
+#### [MODIFY] [Conversation.model.ts](file:///home/shivam-mishra/webdev-learning/studymate/packages/database/src/models/Conversation.model.ts) — Add Server-Side Unread Tracking
+
+```diff
+ const ConversationSchema = new Schema<IConversationDocument>({
+     participants: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
+     lastMessage: { type: Schema.Types.ObjectId, ref: 'Message' },
+     lastMessageAt: { type: Date },
++    unreadCounts: {
++        type: Map,
++        of: Number,
++        default: {},
++    },
+ }, { timestamps: true });
+```
+
+The **message consumer** increments `unreadCounts[participantId]` when a new message is persisted. The **receipt consumer** resets `unreadCounts[userId]` to `0` when a user reads messages.
+
+The [getUserConversations](file:///home/shivam-mishra/webdev-learning/studymate/apps/chat-service/src/services/ChatService.ts#87-93) method now returns the correct unread count per user:
+
+```typescript
+static async getUserConversations(userId: string) {
+    const conversations = await Conversation.find({ participants: userId })
+        .sort({ lastMessageAt: -1 })
+        .populate('participants', 'fullName username profilePicture')
+        .populate('lastMessage')
+        .lean();
+
+    return conversations.map(conv => ({
+        ...conv,
+        unreadCount: conv.unreadCounts?.get(userId) || 0,
+    }));
+}
+```
+
+---
+
+### Step 10: Frontend Integration
+
+The frontend **doesn't change drastically**. The same Socket.IO events are emitted by the Kafka consumers instead of the chat service directly. However, we add a few enhancements:
+
+#### Enhanced [useChatStore.ts](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/stores/useChatStore.ts) Socket Listeners
+
+```typescript
+// Already exists — no change needed for new_message
+socket.on('new_message', (msg) => get().handleReceiveMessage(msg));
+
+// Already exists — handles read receipts
+socket.on('message_read', (payload) => get().handleMessageRead(payload));
+
+// NEW: Handle delivered status
+socket.on('message_delivered', (payload) => {
+    const { conversationId, messageIds } = payload;
+    set(state => {
+        const msgs = state.messages[conversationId] || [];
+        const newMsgs = msgs.map(m =>
+            messageIds.includes(m._id!) ? { ...m, status: 'delivered' } : m
+        );
+        return { messages: { ...state.messages, [conversationId]: newMsgs } };
+    });
+});
+
+// Enhanced: Last seen for offline users
+socket.on('user_offline', ({ userId, lastSeen }) => {
+    set(state => {
+        const newSet = new Set(state.onlineUsers);
+        newSet.delete(userId);
+        return { onlineUsers: newSet, lastSeen: { ...state.lastSeen, [userId]: lastSeen } };
+    });
+});
+```
+
+#### Enhanced Message Status Display in [DMPage.tsx](file:///home/shivam-mishra/webdev-learning/studymate/apps/web/src/pages/DMPage.tsx)
+
+```tsx
+{isMe && (() => {
+    if (msg.readBy && msg.readBy.length > 0) {
+        return <CheckCheck className="w-3 h-3 text-blue-500" />;  // ✓✓ blue = Read
+    }
+    if (msg.status === 'delivered') {
+        return <CheckCheck className="w-3 h-3 text-slate-400" />;  // ✓✓ gray = Delivered
+    }
+    return <Check className="w-3 h-3 text-slate-400" />;           // ✓ gray = Sent
+})()}
+```
+
+---
+
+## 5. Data Flow Diagrams
+
+### Message Send Flow (Instagram-Like)
+
+```mermaid
+sequenceDiagram
+    participant User as Sender (React)
+    participant API as Chat REST API
+    participant K as Kafka (chat.messages)
+    participant MP as Message Processor
+    participant DB as MongoDB
+    participant WS as Socket.IO
+    participant R as Recipient (React)
+
+    User->>API: POST /conversations/:id/messages
+    API->>K: produce({key: convId, value: msgEvent})
+    API-->>User: 200 OK + pending message
+    Note over User: ✓ Single tick (sent)
+
+    K->>MP: consume message event
+    MP->>DB: Message.create()
+    MP->>DB: Conversation.update(lastMessage, unreadCounts++)
+    MP->>WS: io.to(conversation:id).emit('new_message')
+    WS-->>R: new_message event
+    Note over R: Message appears instantly
+
+    MP->>WS: io.to(user:recipientId).emit('notification')
+    Note over R: If offline → push notification
+```
+
+### Read Receipt Flow
+
+```mermaid
+sequenceDiagram
+    participant R as Recipient (React)
+    participant WS as Socket.IO
+    participant K as Kafka (chat.receipts)
+    participant RP as Receipt Processor
+    participant DB as MongoDB
+    participant S as Sender (React)
+
+    Note over R: Opens conversation
+    R->>WS: emit('mark_read', {convId, messageIds})
+    WS->>K: produce receipt event
+    K->>RP: consume receipt
+    RP->>DB: Message.updateMany(status: READ)
+    RP->>DB: Conversation.update(unreadCounts[userId] = 0)
+    RP->>WS: io.to(conversation:id).emit('message_read')
+    WS-->>S: message_read event
+    Note over S: ✓✓ turns blue
+```
+
+### Presence Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User (React)
+    participant WS as Socket.IO Server
+    participant K as Kafka (chat.presence)
+    participant PP as Presence Processor
+    participant Redis as Redis
+    participant All as All Connected Clients
+
+    U->>WS: Socket.IO connect
+    WS->>K: produce {userId, status: 'online'}
+    K->>PP: consume presence
+    PP->>Redis: SADD online_users userId
+    PP->>Redis: SET user:X:last_seen NOW
+    PP->>WS: io.emit('user_online', {userId})
+    WS-->>All: user_online broadcast
+
+    Note over U: ...time passes...
+
+    U->>WS: Socket.IO disconnect
+    WS->>K: produce {userId, status: 'offline'}
+    K->>PP: consume presence
+    PP->>Redis: SREM online_users userId
+    PP->>Redis: SET user:X:last_seen NOW
+    PP->>WS: io.emit('user_offline', {userId, lastSeen})
+    WS-->>All: user_offline broadcast
+```
+
+---
+
+## 6. Schema Changes
+
+### Message Model (Enhanced)
+
+```typescript
+const MessageSchema = new Schema<IMessageDocument>({
+    conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation' },
+    roomId:         { type: Schema.Types.ObjectId, ref: 'Room' },
+    senderId:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    text:           { type: String, required: true },
+    messageType:    { type: String, enum: ['text', 'image', 'file'], default: 'text' },
+    mediaUrl:       { type: String },
+    status:         { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
+    readBy:         [{ type: Schema.Types.ObjectId, ref: 'User' }],  // ← NEW
+    deliveredTo:    [{ type: Schema.Types.ObjectId, ref: 'User' }],  // ← NEW
+}, { timestamps: true });
+
+// Indexes
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
+MessageSchema.index({ roomId: 1, createdAt: -1 });
+MessageSchema.index({ senderId: 1 });
+MessageSchema.index({ status: 1 });   // ← NEW: for receipt queries
+```
+
+### Conversation Model (Enhanced)
+
+```typescript
+const ConversationSchema = new Schema<IConversationDocument>({
+    participants:   [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
+    lastMessage:    { type: Schema.Types.ObjectId, ref: 'Message' },
+    lastMessageAt:  { type: Date },
+    unreadCounts:   { type: Map, of: Number, default: {} },  // ← NEW
+}, { timestamps: true });
+```
+
+---
+
+## 7. Scaling & Production
+
+### Consumer Group Architecture
+
+```mermaid
+graph LR
+    subgraph Kafka Cluster
+        T1[chat.messages<br>6 partitions]
+        T2[chat.receipts<br>6 partitions]
+        T3[chat.typing<br>6 partitions]
+        T4[chat.presence<br>3 partitions]
+    end
+
+    subgraph Message Processors
+        MP1[Worker 1]
+        MP2[Worker 2]
+        MP3[Worker 3]
+    end
+
+    subgraph Receipt Processors
+        RP1[Worker 1]
+        RP2[Worker 2]
+    end
+
+    T1 --> MP1 & MP2 & MP3
+    T2 --> RP1 & RP2
+```
+
+### Scaling Checklist
+
+| Component | Dev | Production |
+|---|---|---|
+| Kafka brokers | 1 | 3+ (replication factor 3) |
+| Partitions per topic | 1-3 | 6-12 (based on throughput) |
+| Message processor workers | 1 | 3-6 (auto-scaled) |
+| Receipt processor workers | 1 | 2-3 |
+| Socket.IO servers | 1 | 3+ (behind load balancer) |
+| Redis | 1 (standalone) | Cluster (3+ nodes) |
+| MongoDB | 1 (standalone) | Replica set (3+ nodes) |
+
+### Production Environment Variables
+
+```env
+# Kafka
+KAFKA_CLIENT_ID=studymate
+KAFKA_BROKERS=kafka-1:9092,kafka-2:9092,kafka-3:9092
+
+# Services
+CHAT_SERVICE_PORT=3003
+MESSAGE_PROCESSOR_PORT=3004
+WS_PORT=3005
+
+# MongoDB
+MONGO_URI=mongodb://mongo-1:27017,mongo-2:27017/studymate?replicaSet=rs0
+
+# Redis
+REDIS_HOST=redis-cluster
+REDIS_PORT=6379
+```
+
+### Monitoring Recommendations
+
+| What to Monitor | Tool |
+|---|---|
+| Kafka consumer lag | Kafka Manager / Burrow |
+| Message processing latency | Prometheus + Grafana |
+| Socket.IO connections | Socket.IO admin UI |
+| MongoDB query performance | MongoDB Atlas / Compass |
+| Redis memory / connections | Redis Insight |
+
+---
+
+## Summary
+
+This architecture transforms StudyMate's chat from a tightly-coupled synchronous system into a **Kafka-powered, event-driven, Instagram-like platform**:
+
+| Feature | Instagram Behavior | Our Implementation |
+|---|---|---|
+| **Message sending** | Instant UI + async persistence | Kafka producer (instant) → consumer (persist + deliver) |
+| **Seen receipts** | Blue double-check when read | `mark_read` → Kafka receipts topic → consumer broadcasts |
+| **Typing indicator** | "typing..." visible in real-time | Socket → Kafka typing topic → consumer broadcasts |
+| **Online/offline** | Green dot + "Active X min ago" | Socket connect/disconnect → Kafka presence → Redis last_seen |
+| **Unread badge** | Red badge with count | Server-side `unreadCounts` map on Conversation, updated by consumers |
+| **Multi-device** | Synced across phone/web/tablet | Kafka consumers broadcast to ALL sockets via user rooms |
+| **Scalability** | Billions of messages | Partitioned topics, consumer groups, horizontal scaling |

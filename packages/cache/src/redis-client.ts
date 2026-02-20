@@ -40,4 +40,9 @@ export const disconnectRedis = async (): Promise<void> => {
     }
 };
 
+export const sendCommand = async (command: string[]): Promise<any> => {
+    const client = await connectRedis();
+    return client.sendCommand(command);
+};
+
 export { redisClient };

@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { createPostSchema, updatePostSchema, createCommentSchema } from '@studymate/validation';
 import { PostController } from '../controllers/post.controller';
 
 const router = Router();
 
-router.get('/', PostController.getAll);
+router.get('/', optionalAuthenticate, PostController.getAll);
 router.get('/:id', PostController.getById);
 router.post('/', authenticate, validate(createPostSchema), PostController.create);
 router.put('/:id', authenticate, validate(updatePostSchema), PostController.update);

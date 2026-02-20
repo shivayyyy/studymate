@@ -23,12 +23,23 @@ export const RedisKeys = {
     trendingFeed: (exam: string) => `feed:trending:${exam}`,
     followingFeed: (userId: string) => `feed:following:${userId}`,
 
+    // New Scalable Feed System
+    feedLatest: (examCategory: string) => `feed:exam:${examCategory}:latest`,
+    feedTrending: (examCategory: string) => `feed:exam:${examCategory}:trending`,
+    feedSubject: (examCategory: string, subject: string) => `feed:exam:${examCategory}:subject:${subject}`,
+    feedTag: (examCategory: string, tag: string) => `feed:exam:${examCategory}:tag:${tag}`,
+
+    // Entities
+    post: (postId: string) => `post:${postId}`,
+
     // Leaderboard (sorted sets)
     leaderboardWeekly: (exam: string) => `leaderboard:${exam}:weekly`,
     leaderboardAllTime: (exam: string) => `leaderboard:${exam}:alltime`,
 
     // Session tracking
     activeSession: (userId: string) => `session:active:${userId}`,
+
+    postLikes: (postId: string) => `post:${postId}:likes`,
 
     // Rate limiting
     rateLimit: (ip: string) => `ratelimit:${ip}`,

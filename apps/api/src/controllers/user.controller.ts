@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { User, Follow } from '@studymate/database';
+import { User, Follow, Post, Save } from '@studymate/database';
 import { UserCache } from '@studymate/cache';
 import { asyncHandler, success, parsePagination } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
@@ -119,5 +119,62 @@ export class UserController {
             .populate('followingId', 'username fullName profilePicture');
         const total = await Follow.countDocuments({ followerId: req.params.id });
         res.json(success(follows, 'Following fetched', { page, limit, total, totalPages: Math.ceil(total / limit) }));
+    });
+
+    static getUserPosts = asyncHandler(async (req: Request, res: Response) => {
+        const { page, limit } = parsePagination(req.query as any);
+        const userId = req.params.id;
+
+        const posts = await Post.find({ userId, isActive: true })
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .populate('userId', 'username fullName profilePicture');
+
+        const total = await Post.countDocuments({ userId, isActive: true });
+
+        res.json(success(posts, 'User posts fetched', { page, limit, total, totalPages: Math.ceil(total / limit) }));
+    });
+
+    static getUserSaved = asyncHandler(async (req: Request, res: Response) => {
+        const { page, limit } = parsePagination(req.query as any);
+        const userId = req.params.id;
+
+        // Verify user exists first? Optional but good.
+
+        const savedItems = await Save.find({ userId })
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .populate({
+                path: 'postId',
+                populate: { path: 'userId', select: 'username fullName profilePicture' }
+            });
+
+        const total = await Save.countDocuments({ userId });
+
+        res.json(success(savedItems, 'Saved items fetched', { page, limit, total, totalPages: Math.ceil(total / limit) }));
+    });
+
+    static checkUsernameAvailability = asyncHandler(async (req: Request, res: Response) => {
+        const { username } = req.query;
+        if (!username || typeof username !== 'string') {
+            throw new AppError('Username is required', 400);
+        }
+
+        const { usernameBloomFilter } = await import('../lib/bloom');
+
+        // Check Bloom Filter first (Source of Truth for availability)
+        const isTaken = await usernameBloomFilter.exists(username);
+
+        if (isTaken) {
+            // Bloom filter says yes: It MIGHT be taken (false positive possible but rare)
+            // But per instructions: "If 1 (Found): You tell the user 'Username Taken.' You do not check the database."
+            res.json(success({ available: false }, 'Username taken'));
+            return;
+        }
+
+        // Bloom filter says no: It is DEFINITELY available
+        res.json(success({ available: true }, 'Username available'));
     });
 }

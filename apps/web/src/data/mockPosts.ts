@@ -2,48 +2,56 @@ import { Post } from '../components/PostCard';
 
 export const posts: Post[] = [
     {
-        id: '1',
-        author: {
-            name: 'Priya Sharma',
-            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya',
-            role: 'IIT Delhi \'25',
-            badge: 'Gold'
+        _id: '1',
+        userId: {
+            _id: 'u1',
+            fullName: 'Priya Sharma',
+            username: 'priya_iit',
+            profilePicture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya',
         },
-        timeAgo: '2 hours ago',
+        createdAt: new Date().toISOString(),
         title: 'Integration Shortcuts: Definitive Guide for JEE Advanced 2024',
-        content: 'Sharing my handwritten notes for definite integration. Includes 15+ shortcuts for Wallis Formula, King\'s Property...',
-        image: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=2670&auto=format&fit=crop',
-        tags: ['Mathematics', 'Calculus', 'JEE Advanced'],
-        stats: { likes: 1200, comments: 84 },
-        type: 'Note'
+        contentType: 'NOTES',
+        thumbnailUrl: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=2670&auto=format&fit=crop',
+        subject: 'Mathematics',
+        examCategory: 'JEE',
+        likesCount: 1200,
+        commentsCount: 84,
+        savesCount: 120
     },
     {
-        id: '2',
-        author: {
-            name: 'Aditya Verma',
-            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aditya',
-            role: 'AIIMS Aspirant',
+        _id: '2',
+        userId: {
+            _id: 'u2',
+            fullName: 'Aditya Verma',
+            username: 'aditya_aiims',
+            profilePicture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aditya',
         },
-        timeAgo: '5 hours ago',
+        createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
         title: 'Human Physiology: Hormonal Control Flowchart',
-        content: 'Pro tip: Remember the mnemonic G-F-R for adrenal cortex layers (Glomerulosa, Fasciculata, Reticularis). Essential for quick recall in MCQ tests!',
-        tags: ['Biology', 'NEET'],
-        stats: { likes: 458, comments: 12 },
-        type: 'Flowchart'
+        contentType: 'MNEMONICS', // Mapping Flowchart to close equiv or add new
+        subject: 'Biology',
+        examCategory: 'NEET',
+        likesCount: 458,
+        commentsCount: 12,
+        savesCount: 45
     },
     {
-        id: '3',
-        author: {
-            name: 'Dr. Amit Vats',
-            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Amit',
-            role: 'Physics Mentor',
-            badge: 'Gold'
+        _id: '3',
+        userId: {
+            _id: 'u3',
+            fullName: 'Dr. Amit Vats',
+            username: 'amit_phy',
+            profilePicture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Amit',
         },
-        timeAgo: 'Yesterday',
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
         title: 'Visualizing Rotational Motion - Why Torque matters',
-        image: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?q=80&w=2670&auto=format&fit=crop', // Beach? Using abstract physics placeholder if possible, sticking to unsplash
-        tags: ['Physics', 'Mechanics'],
-        stats: { likes: 3400, comments: 210 },
-        type: 'Video'
+        thumbnailUrl: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?q=80&w=2670&auto=format&fit=crop',
+        contentType: 'PYQ', // closest
+        subject: 'Physics',
+        examCategory: 'JEE',
+        likesCount: 3400,
+        commentsCount: 210,
+        savesCount: 890
     }
 ];
