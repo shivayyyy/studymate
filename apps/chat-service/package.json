@@ -9,7 +9,6 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
-        "@clerk/express": "^1.7.72",
         "@socket.io/redis-adapter": "^8.3.0",
         "@studymate/auth": "workspace:*",
         "@studymate/cache": "workspace:*",
@@ -17,6 +16,7 @@
         "@studymate/database": "workspace:*",
         "@studymate/logger": "workspace:*",
         "@studymate/utils": "workspace:*",
+        "@supabase/supabase-js": "^2.97.0",
         "@types/dotenv": "^8.2.3",
         "cors": "^2.8.5",
         "dotenv": "^17.3.1",

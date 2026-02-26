@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { getAuth } from '@clerk/express';
 import { User } from '@studymate/database';
+import { supabase } from '../lib/supabase';
 
 declare global {
     namespace Express {
@@ -16,19 +16,26 @@ declare global {
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        // Use Clerk's getAuth to verify the JWT
-        const { userId: clerkUserId } = getAuth(req);
-
-        if (!clerkUserId) {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
             res.status(401).json({ success: false, message: 'Authentication required' });
             return;
         }
 
-        // Look up the user in our database by clerkId
-        let user = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
+        const token = authHeader.split(' ')[1];
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+
+        if (authError || !authUser) {
+            res.status(401).json({ success: false, message: 'Invalid or expired token' });
+            return;
+        }
+
+        const supabaseId = authUser.id;
+
+        let user = await User.findOne({ supabaseId }).select('-passwordHash');
 
         if (!user) {
-            // Auto-provision: if no user exists with this clerkId, this is a new Clerk user
+            // Auto-provision: if no user exists with this supabaseId, this is a new Supabase user
             // We'll return 401 for now — the /auth/sync route will handle user creation
             res.status(401).json({ success: false, message: 'User not found. Please complete profile setup.' });
             return;
@@ -53,16 +60,20 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 export const optionalAuthenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const { userId: clerkUserId } = getAuth(req);
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            const { data: { user: authUser } } = await supabase.auth.getUser(token);
 
-        if (clerkUserId) {
-            const user = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
-            if (user && user.isActive) {
-                req.user = {
-                    userId: user._id.toString(),
-                    email: user.email,
-                    username: user.username,
-                };
+            if (authUser) {
+                const user = await User.findOne({ supabaseId: authUser.id }).select('-passwordHash');
+                if (user && user.isActive) {
+                    req.user = {
+                        userId: user._id.toString(),
+                        email: user.email,
+                        username: user.username,
+                    };
+                }
             }
         }
     } catch (error) {

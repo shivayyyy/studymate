@@ -47,14 +47,14 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
 
     return (
         <>
-            <article className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors p-4 cursor-pointer">
-                <div className="flex gap-3">
+            <article className="bg-white border-b border-slate-100 hover:bg-slate-50/50 transition-colors p-3 sm:p-4 cursor-pointer sm:rounded-xl sm:border sm:shadow-sm">
+                <div className="flex gap-2 sm:gap-3">
                     {/* Avatar Column */}
                     <div className="shrink-0">
                         <img
                             src={authorPic || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorName)}&background=random`}
                             alt={authorUsername}
-                            className="w-10 h-10 rounded-full object-cover hover:opacity-90"
+                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover hover:opacity-90 shadow-sm"
                         />
                     </div>
 
@@ -62,11 +62,11 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
                     <div className="flex-1 min-w-0">
                         {/* Header */}
                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5 text-[15px] leading-tight">
+                            <div className="flex items-center gap-1.5 text-sm sm:text-[15px] leading-tight flex-wrap">
                                 <span className="font-bold text-slate-900 hover:underline">{authorName}</span>
                                 <span className="text-slate-500 font-normal">@{authorUsername}</span>
-                                <span className="text-slate-500 font-normal">·</span>
-                                <span className="text-slate-500 font-normal hover:underline">{timeAgo(post.createdAt)}</span>
+                                <span className="text-slate-500 font-normal hidden sm:inline">·</span>
+                                <span className="text-slate-500 font-normal hover:underline text-xs sm:text-sm">{timeAgo(post.createdAt)}</span>
                             </div>
                             <button className="text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-full p-2 -mr-2 transition-colors">
                                 <MoreHorizontal size={18} />
@@ -76,7 +76,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
                         {/* Post Text */}
                         <div className="mt-1 mb-2">
                             {post.description && (
-                                <p className="text-[15px] text-slate-900 whitespace-pre-wrap leading-normal">
+                                <p className="text-sm sm:text-[15px] text-slate-800 whitespace-pre-wrap leading-relaxed sm:leading-normal line-clamp-10">
                                     {post.description}
                                 </p>
                             )}
@@ -136,25 +136,25 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
 
 
                         {/* Action Bar */}
-                        <div className="flex justify-between mt-3 max-w-md">
+                        <div className="flex justify-between mt-3 max-w-md -ml-2">
                             <button
                                 onClick={(e) => { e.stopPropagation(); onComment?.(); }}
-                                className="group flex items-center gap-2 text-slate-500 hover:text-blue-500 transition-colors"
+                                className="group flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-blue-500 transition-colors"
                             >
                                 <div className="p-2 rounded-full group-hover:bg-blue-50 transition-colors">
-                                    <MessageCircle size={18} />
+                                    <MessageCircle size={16} className="sm:size-[18px]" />
                                 </div>
-                                <span className="text-xs group-hover:text-blue-500">{post.commentsCount || 0}</span>
+                                <span className="text-[11px] sm:text-xs group-hover:text-blue-500">{post.commentsCount || 0}</span>
                             </button>
 
                             <button
                                 onClick={(e) => { e.stopPropagation(); onShare?.(); }}
-                                className="group flex items-center gap-2 text-slate-500 hover:text-green-500 transition-colors"
+                                className="group flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-green-500 transition-colors"
                             >
                                 <div className="p-2 rounded-full group-hover:bg-green-50 transition-colors">
-                                    <Repeat2 size={18} />
+                                    <Repeat2 size={16} className="sm:size-[18px]" />
                                 </div>
-                                <span className="text-xs group-hover:text-green-500">{post.sharesCount || 0}</span>
+                                <span className="text-[11px] sm:text-xs group-hover:text-green-500">{post.sharesCount || 0}</span>
                             </button>
 
 
@@ -165,7 +165,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
                                     setLikesCount(prev => isLiked ? prev - 1 : prev + 1);
                                     onLike?.();
                                 }}
-                                className={`group flex items-center gap-2 transition-colors ${isLiked ? 'text-red-600' : 'text-slate-500 hover:text-red-500'}`}
+                                className={`group flex items-center gap-1 sm:gap-2 transition-colors ${isLiked ? 'text-red-600' : 'text-slate-500 hover:text-red-500'}`}
                             >
                                 <div className={`p-2 rounded-full transition-all duration-300 ${isLiked ? 'bg-red-50' : 'group-hover:bg-red-50'}`}>
                                     <motion.div
@@ -173,27 +173,26 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, onLike, onComment, onShare, o
                                         transition={{ duration: 0.3 }}
                                     >
                                         <Heart
-                                            size={18}
-                                            className={`transition-all duration-300 ${isLiked ? 'fill-red-500 text-red-600' : ''}`}
+                                            size={16}
+                                            className={`sm:size-[18px] transition-all duration-300 ${isLiked ? 'fill-red-500 text-red-600' : ''}`}
                                         />
                                     </motion.div>
                                 </div>
-                                <span className={`text-xs ${isLiked ? 'font-bold text-red-600' : 'group-hover:text-red-500'}`}>{likesCount || 0}</span>
+                                <span className={`text-[11px] sm:text-xs ${isLiked ? 'font-bold text-red-600' : 'group-hover:text-red-500'}`}>{likesCount || 0}</span>
                             </button>
 
                             <button
                                 onClick={(e) => { e.stopPropagation(); onSave?.(); }}
-                                className="group flex items-center gap-2 text-slate-500 hover:text-blue-500 transition-colors"
+                                className="group flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-blue-500 transition-colors"
                             >
                                 <div className="p-2 rounded-full group-hover:bg-blue-50 transition-colors">
-                                    <Bookmark size={18} />
+                                    <Bookmark size={16} className="sm:size-[18px]" />
                                 </div>
-                                <span className="text-xs group-hover:text-blue-500">{post.savesCount || 0}</span>
                             </button>
 
-                            <button className="group flex items-center gap-2 text-slate-500 hover:text-blue-500 transition-colors">
+                            <button className="group flex items-center gap-1 sm:gap-2 text-slate-500 hover:text-blue-500 transition-colors">
                                 <div className="p-2 rounded-full group-hover:bg-blue-50 transition-colors">
-                                    <Share size={18} />
+                                    <Share size={16} className="sm:size-[18px]" />
                                 </div>
                             </button>
                         </div>

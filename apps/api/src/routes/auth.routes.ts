@@ -3,36 +3,49 @@ import { validate } from '../middleware/validate.middleware';
 import { registerSchema, loginSchema, refreshTokenSchema } from '@studymate/validation';
 import { AuthController } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { getAuth, clerkClient } from '@clerk/express';
 import { User } from '@studymate/database';
 
 const router = Router();
 
-// Clerk sync endpoint: creates or finds a user in our DB based on Clerk identity
+// Supabase sync endpoint: creates or finds a user in our DB based on Supabase identity
 router.post('/sync', async (req: Request, res: Response) => {
     try {
-        const { userId: clerkUserId } = getAuth(req);
-
-        if (!clerkUserId) {
-            res.status(401).json({ success: false, message: 'Not authenticated with Clerk' });
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            res.status(401).json({ success: false, message: 'Not authenticated with Supabase' });
             return;
         }
 
-        // 1. Check if user already exists in our DB by Clerk ID
-        const existingUserByClerkId = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
+        const token = authHeader.split(' ')[1];
 
-        if (existingUserByClerkId) {
-            res.json({ success: true, data: existingUserByClerkId, message: 'User found' });
+        // Use the admin client to verify and fetch user info securely
+        // We import the same client we created for middleware.
+        const { supabase } = await import('../lib/supabase');
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+
+        if (authError || !authUser) {
+            res.status(401).json({ success: false, message: 'Invalid or expired token' });
             return;
         }
 
-        // 2. Fetch user details from Clerk to find them by email if needed
-        const clerkUser = await clerkClient.users.getUser(clerkUserId);
-        const email = clerkUser.emailAddresses[0]?.emailAddress;
-        const fullName = `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || 'User';
+        const supabaseUserId = authUser.id;
+
+        // 1. Check if user already exists in our DB by Supabase ID
+        const existingUserById = await User.findOne({ supabaseId: supabaseUserId }).select('-passwordHash');
+
+        if (existingUserById) {
+            res.json({ success: true, data: existingUserById, message: 'User found' });
+            return;
+        }
+
+        // 2. Extract email and basic info from JWT claims/user object
+        const email = authUser.email;
+        // User metadata from OAuth like Google might contain name/avatar
+        const fullName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'StudyMate User';
+        const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture || undefined;
 
         if (!email) {
-            res.status(400).json({ success: false, message: 'No email found in Clerk profile' });
+            res.status(400).json({ success: false, message: 'No email found in Supabase profile' });
             return;
         }
 
@@ -40,11 +53,11 @@ router.post('/sync', async (req: Request, res: Response) => {
         const existingUserByEmail = await User.findOne({ email }).select('-passwordHash');
 
         if (existingUserByEmail) {
-            // Link existing user to Clerk
-            existingUserByEmail.clerkId = clerkUserId;
-            if (clerkUser.imageUrl) existingUserByEmail.profilePicture = clerkUser.imageUrl;
+            // Link existing user to Supabase
+            existingUserByEmail.supabaseId = supabaseUserId;
+            if (avatarUrl && !existingUserByEmail.profilePicture) existingUserByEmail.profilePicture = avatarUrl;
             await existingUserByEmail.save();
-            res.json({ success: true, data: existingUserByEmail, message: 'User linked to Clerk' });
+            res.json({ success: true, data: existingUserByEmail, message: 'User linked to Supabase' });
             return;
         }
 
@@ -54,9 +67,9 @@ router.post('/sync', async (req: Request, res: Response) => {
             email,
             username,
             fullName,
-            clerkId: clerkUserId,
-            profilePicture: clerkUser.imageUrl || undefined,
-            isVerified: true,
+            supabaseId: supabaseUserId,
+            profilePicture: avatarUrl,
+            isVerified: true, // They verified email via provider usually.
         });
 
         res.status(201).json({ success: true, data: newUser, message: 'User created' });

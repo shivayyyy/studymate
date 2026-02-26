@@ -30,7 +30,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
 
     const [mediaFiles, setMediaFiles] = useState<File[]>([]);
     const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
-    const [isUploading, setIsUploading] = useState(false);
     const [isPosting, setIsPosting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,7 +76,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
             let thumbnailUrl = undefined;
 
             if (mediaFiles.length > 0) {
-                setIsUploading(true);
                 // Upload all files in parallel
                 const uploadPromises = mediaFiles.map(file => UploadService.uploadFile(file));
                 const uploadResults = await Promise.all(uploadPromises);
@@ -94,7 +92,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                     thumbnailUrl = uploadResults[firstImageIndex].data.url;
                 }
 
-                setIsUploading(false);
             }
 
             const res = await FeedService.createPost({
@@ -117,24 +114,23 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
             }
         } catch (error) {
             console.error('Failed to create post:', error);
-            setIsUploading(false);
         } finally {
             setIsPosting(false);
         }
     };
 
     return (
-        <div className="bg-white border-b border-slate-100 p-4 mb-4 rounded-xl shadow-sm">
-            <div className="flex gap-4">
+        <div className="bg-white border-b border-slate-100 p-3 sm:p-4 mb-2 sm:mb-4 sm:rounded-xl shadow-sm">
+            <div className="flex gap-3 sm:gap-4">
                 <div className="shrink-0">
-                    <img src={user?.profilePicture || "https://api.dicebear.com/7.x/avataaars/svg?seed=User"} alt="Profile" className="w-10 h-10 rounded-full hover:opacity-90 cursor-pointer" />
+                    <img src={user?.profilePicture || "https://api.dicebear.com/7.x/avataaars/svg?seed=User"} alt="Profile" className="w-8 h-8 sm:w-10 sm:h-10 rounded-full hover:opacity-90 cursor-pointer" />
                 </div>
                 <div className="flex-1 space-y-3">
                     <textarea
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
-                        placeholder="What's on your mind? Share notes, doubts, or strategies..."
-                        className="w-full bg-transparent border-none outline-none text-slate-700 text-lg placeholder:text-slate-500 font-normal resize-none focus:ring-0 p-0 min-h-[80px]"
+                        placeholder="What's on your mind?"
+                        className="w-full bg-transparent border-none outline-none text-base sm:text-lg placeholder:text-slate-500 font-normal resize-none focus:ring-0 p-0 min-h-[60px] sm:min-h-[80px]"
                     />
 
                     {mediaPreviews.length > 0 && (
@@ -160,29 +156,27 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                         </div>
                     )}
 
-                    <div className="flex justify-between items-center pt-3 border-t border-slate-50">
-                        <div className="flex items-center gap-2">
-                            <div className="flex gap-1 text-blue-500 mr-2">
+                    <div className="flex flex-wrap items-center justify-between pt-2 sm:pt-3 border-t border-slate-50 gap-2">
+                        <div className="flex items-center gap-1 sm:gap-2">
+                            <div className="flex gap-0.5 sm:gap-1 text-blue-500 mr-1 sm:mr-2">
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="p-2 hover:bg-blue-50 rounded-full transition-colors relative group"
+                                    className="p-1.5 sm:p-2 hover:bg-blue-50 rounded-full transition-colors relative"
                                 >
-                                    <Image size={20} />
-                                    <span className="sr-only">Upload Image</span>
+                                    <Image size={18} className="sm:size-5" />
                                 </button>
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="p-2 hover:bg-blue-50 rounded-full transition-colors relative group"
+                                    className="p-1.5 sm:p-2 hover:bg-blue-50 rounded-full transition-colors relative"
                                 >
-                                    <Upload size={20} />
-                                    <span className="sr-only">Upload File</span>
+                                    <Upload size={18} className="sm:size-5" />
                                 </button>
                             </div>
 
                             <select
                                 value={contentType}
                                 onChange={(e) => setContentType(e.target.value)}
-                                className="text-xs font-medium text-slate-600 bg-slate-100 border-none rounded-lg py-1.5 pl-2 pr-8 focus:ring-0 cursor-pointer hover:bg-slate-200 transition-colors"
+                                className="text-[10px] sm:text-xs font-semibold text-slate-600 bg-slate-100 border-none rounded-lg py-1 sm:py-1.5 pl-2 pr-6 sm:pr-8 focus:ring-0 cursor-pointer"
                             >
                                 {CONTENT_TYPES.map(type => (
                                     <option key={type.value} value={type.value}>{type.label}</option>
@@ -192,7 +186,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                             <select
                                 value={subject}
                                 onChange={(e) => setSubject(e.target.value)}
-                                className="text-xs font-medium text-slate-600 bg-slate-100 border-none rounded-lg py-1.5 pl-2 pr-8 focus:ring-0 cursor-pointer hover:bg-slate-200 transition-colors"
+                                className="text-[10px] sm:text-xs font-semibold text-slate-600 bg-slate-100 border-none rounded-lg py-1 sm:py-1.5 pl-2 pr-6 sm:pr-8 focus:ring-0 cursor-pointer"
                             >
                                 {availableSubjects.map(sub => (
                                     <option key={sub} value={sub}>{sub}</option>
@@ -203,10 +197,10 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
                         <button
                             onClick={handleSubmit}
                             disabled={!description.trim() || isPosting}
-                            className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-1.5 rounded-full text-[15px] font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-5 py-1 sm:py-1.5 rounded-full text-xs sm:text-[15px] font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1.5 sm:gap-2 ml-auto"
                         >
-                            {isPosting && <Loader2 size={16} className="animate-spin" />}
-                            {isPosting ? (isUploading ? 'Uploading...' : 'Posting...') : 'Post'}
+                            {isPosting && <Loader2 size={14} className="animate-spin" />}
+                            {isPosting ? '...' : 'Post'}
                         </button>
                     </div>
                 </div>

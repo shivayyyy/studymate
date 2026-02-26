@@ -148,7 +148,7 @@ export const updateUserStudyStats = async (userId: string, sessionDurationMinute
     }, { new: true });
 
     // Update leaderboard
-    if (user) {
+    if (user && user.examCategory) {
         await LeaderboardCache.updateUserScore(user.examCategory, userId, totalHours);
     }
 };

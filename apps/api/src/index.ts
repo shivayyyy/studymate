@@ -5,7 +5,6 @@ import morgan from 'morgan';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
-import { clerkMiddleware } from '@clerk/express';
 
 import { connectDB } from '@studymate/database';
 import { connectRedis } from '@studymate/cache';
@@ -22,8 +21,10 @@ import { postRouter } from './routes/post.routes';
 import { sessionRouter } from './routes/session.routes';
 import { feedRouter } from './routes/feed.routes';
 import { analyticsRouter } from './routes/analytics.routes';
+import notificationRouter from './routes/notification.routes';
 
 import uploadRouter from './routes/upload.routes';
+import { livekitRoutes } from './routes/livekit.routes';
 import { errorHandler } from './middleware/error-handler';
 
 const logger = createLogger('api');
@@ -56,7 +57,6 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(clerkMiddleware());
 app.use(morgan('dev'));
 
 // Rate limiting
@@ -92,8 +92,10 @@ app.use(`${API_PREFIX}/posts`, postRouter);
 app.use(`${API_PREFIX}/sessions`, sessionRouter);
 app.use(`${API_PREFIX}/feed`, feedRouter);
 app.use(`${API_PREFIX}/analytics`, analyticsRouter);
+app.use(`${API_PREFIX}/notifications`, notificationRouter);
 
 app.use(`${API_PREFIX}/upload`, uploadRouter);
+app.use(`${API_PREFIX}`, livekitRoutes);
 
 // ==================== Error Handling ====================
 

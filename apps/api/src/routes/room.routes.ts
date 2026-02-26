@@ -13,5 +13,6 @@ router.post('/', RoomController.createRoom);
 router.get('/', RoomController.getRooms);
 router.get('/:id', RoomController.getRoomById);
 router.post('/:id/join', RoomController.joinRoom);
+router.delete('/:id', RoomController.deleteRoom);
 
 export const roomRouter = router;

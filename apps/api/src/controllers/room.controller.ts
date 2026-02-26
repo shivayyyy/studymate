@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Room } from '@studymate/database';
+import { RoomCache } from '@studymate/cache';
 import { asyncHandler } from '@studymate/utils';
 import { success, error } from '@studymate/utils';
 import bcrypt from 'bcryptjs';
@@ -8,7 +9,7 @@ export class RoomController {
 
     // Create a new room
     static createRoom = asyncHandler(async (req: Request, res: Response) => {
-        const { name, description, type, password, examCategory, subject, timerMode, customTimerConfig } = req.body;
+        const { name, description, type, category, password, examCategory, subject } = req.body;
         const userId = req.user?.userId;
 
         if (!userId) {
@@ -31,12 +32,12 @@ export class RoomController {
             name,
             description,
             type,
+            category: category || 'STUDY',
             password: hashedPassword,
             createdBy: userId,
+            ownerId: userId, // Set creator as initial owner
             examCategory,
             subject,
-            timerMode,
-            customTimerConfig,
             currentOccupancy: 0, // Initially 0, or 1 if creator auto-joins
             maxOccupancy: 50
         });
@@ -50,13 +51,16 @@ export class RoomController {
 
     // Get all rooms (with filters)
     static getRooms = asyncHandler(async (req: Request, res: Response) => {
-        const { type, examCategory, search } = req.query;
+        const { type, category, examCategory, search } = req.query;
 
         const query: any = { isActive: true };
         const sort: any = { currentOccupancy: -1, createdAt: -1 }; // Default sort
 
         if (type && ['PUBLIC', 'PRIVATE'].includes(type as string)) {
             query.type = type;
+        }
+        if (category && ['STUDY', 'QUIZ'].includes(category as string)) {
+            query.category = category;
         }
         if (examCategory && examCategory !== 'ALL') {
             query.examCategory = examCategory;
@@ -81,7 +85,21 @@ export class RoomController {
 
         const total = await Room.countDocuments(query);
 
-        res.json(success(rooms, 'Rooms fetched successfully', {
+        // Enrich rooms with live occupancy from Redis
+        const enrichedRooms = await Promise.all(
+            rooms.map(async (room) => {
+                const roomObj = room.toObject();
+                try {
+                    const liveUsers = await RoomCache.getRoomUsers(room._id.toString());
+                    roomObj.currentOccupancy = liveUsers.length;
+                } catch {
+                    // Fallback to DB value if Redis fails
+                }
+                return roomObj;
+            })
+        );
+
+        res.json(success(enrichedRooms, 'Rooms fetched successfully', {
             page,
             limit,
             total,
@@ -135,5 +153,55 @@ export class RoomController {
         delete roomData.password;
 
         res.json(success(roomData, 'Joined room successfully'));
+    });
+
+    // Transfer Room Ownership
+    static transferOwnership = asyncHandler(async (req: Request, res: Response) => {
+        const { id } = req.params;
+        const { newOwnerId } = req.body;
+        const currentUserId = req.user?.userId;
+
+        const room = await Room.findById(id);
+
+        if (!room) {
+            res.status(404).json(error('Room not found', 404));
+            return;
+        }
+
+        // Only current owner can transfer ownership
+        if (room.ownerId?.toString() !== currentUserId) {
+            res.status(403).json(error('Only the room owner can transfer ownership', 403));
+            return;
+        }
+
+        room.ownerId = newOwnerId;
+        room.isOwnerless = false;
+        await room.save();
+
+        res.json(success(room, 'Ownership transferred successfully'));
+    });
+
+    // Delete Room
+    static deleteRoom = asyncHandler(async (req: Request, res: Response) => {
+        const { id } = req.params;
+        const userId = req.user?.userId;
+
+        const room = await Room.findById(id);
+
+        if (!room) {
+            res.status(404).json(error('Room not found', 404));
+            return;
+        }
+
+        // Only owner can delete room
+        if (room.ownerId?.toString() !== userId) {
+            res.status(403).json(error('Only the room owner can delete the room', 403));
+            return;
+        }
+
+        room.isActive = false;
+        await room.deleteOne();
+
+        res.json(success(null, 'Room deleted successfully'));
     });
 }

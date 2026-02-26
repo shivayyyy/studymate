@@ -1,6 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
-import { getAuth } from '@clerk/express';
 import { User } from '@studymate/database';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+    process.env.SUPABASE_URL || '',
+    process.env.SUPABASE_ANON_KEY || ''
+);
 
 declare global {
     namespace Express {
@@ -21,21 +26,28 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         console.log('Path:', req.path);
         console.log('Headers (Authorization):', req.headers.authorization);
 
-        const authInfo = getAuth(req);
-        console.log('Clerk getAuth result:', JSON.stringify(authInfo, null, 2));
-
-        const { userId: clerkUserId } = authInfo;
-
-        if (!clerkUserId) {
-            console.log('=> FAILED: No clerkUserId parsed by getAuth');
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.log('=> FAILED: Missing or malformed Authorization Bearer token');
             res.status(401).json({ success: false, message: 'Authentication required' });
             return;
         }
 
-        const user = await User.findOne({ clerkId: clerkUserId }).select('-passwordHash');
+        const token = authHeader.split(' ')[1];
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+
+        if (authError || !authUser) {
+            console.log('=> FAILED: Supabase user verification failed:', authError?.message);
+            res.status(401).json({ success: false, message: 'Invalid or expired token' });
+            return;
+        }
+
+        const supabaseUserId = authUser.id;
+
+        const user = await User.findOne({ supabaseId: supabaseUserId }).select('-passwordHash');
 
         if (!user) {
-            console.log('=> FAILED: User not found in DB with clerkId:', clerkUserId);
+            console.log('=> FAILED: User not found in DB with supabaseId:', supabaseUserId);
             res.status(401).json({ success: false, message: 'User not found. Please complete profile setup.' });
             return;
         }

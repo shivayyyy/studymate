@@ -29,4 +29,21 @@ export class RoomCache {
     static async getRoomUsers(roomId: string): Promise<string[]> {
         return CacheManager.sMembers(RedisKeys.roomUsers(roomId));
     }
+
+    // Mic time tracking (stored in milliseconds)
+    static async getMicTimeUsed(roomId: string, userId: string): Promise<number> {
+        const val = await CacheManager.get<number>(RedisKeys.roomUserMicTime(roomId, userId));
+        return val || 0;
+    }
+
+    static async incrMicTime(roomId: string, userId: string, additionalMs: number): Promise<number> {
+        const current = await this.getMicTimeUsed(roomId, userId);
+        const updated = current + additionalMs;
+        await CacheManager.set(RedisKeys.roomUserMicTime(roomId, userId), updated, RedisTTL.ROOM_STATE);
+        return updated;
+    }
+
+    static async resetMicTime(roomId: string, userId: string): Promise<void> {
+        await CacheManager.del(RedisKeys.roomUserMicTime(roomId, userId));
+    }
 }

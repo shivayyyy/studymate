@@ -5,6 +5,7 @@ import { createLogger } from '@studymate/logger';
 import { Server } from 'http';
 import { socketAuth } from '../middleware/socket.auth.middleware';
 import { Conversation, Message, MessageStatus, Room } from '@studymate/database';
+import { RoomCache } from '@studymate/cache';
 import { Types } from 'mongoose';
 
 const logger = createLogger('socket-service');
@@ -168,22 +169,256 @@ export class SocketService {
 
             socket.on('join_room', async (roomId: string) => {
                 try {
-                    // Strict Room Validation
-                    // Check if room exists and is active
                     const room = await Room.findOne({ _id: roomId, isActive: true });
-
                     if (!room) {
-                        logger.warn(`User ${userId} attempted to join invalid/inactive room ${roomId}`);
                         socket.emit('error', { message: 'Room not found or inactive' });
                         return;
                     }
-
-                    // In the future, check specific room membership lists here if added to schema
-
                     await socket.join(`room:${roomId}`);
                     logger.debug(`Socket ${socketId} joined room: ${roomId}`);
                 } catch (error) {
                     logger.error(`Error joining room:`, error);
+                }
+            });
+
+            // ==================== Room System Handlers ====================
+
+            socket.on('room:join', async (data: { roomId: string }) => {
+                const { roomId } = data;
+                try {
+                    socket.join(roomId);
+                    await RoomCache.addUserToRoom(roomId, userId);
+                    await RoomCache.incrementOccupancy(roomId);
+
+                    const users = await RoomCache.getRoomUsers(roomId);
+
+                    socket.to(roomId).emit('room:user-joined', {
+                        userId,
+                        username: socket.user?.username || 'Unknown',
+                        occupancy: users.length,
+                    });
+
+                    socket.emit('room:joined', {
+                        roomId,
+                        users,
+                        occupancy: users.length,
+                    });
+
+                    logger.info(`User ${userId} joined room ${roomId}`);
+                } catch (error) {
+                    logger.error(`Error in room:join for room ${roomId}:`, error);
+                    socket.emit('room:error', { message: 'Failed to join room' });
+                }
+            });
+
+            socket.on('room:leave', async (data: { roomId: string }) => {
+                const { roomId } = data;
+                try {
+                    socket.leave(roomId);
+                    await RoomCache.removeUserFromRoom(roomId, userId);
+                    await RoomCache.decrementOccupancy(roomId);
+
+                    const users = await RoomCache.getRoomUsers(roomId);
+
+                    socket.to(roomId).emit('room:user-left', {
+                        userId,
+                        occupancy: users.length,
+                    });
+
+                    logger.info(`User ${userId} left room ${roomId}`);
+
+                    // Check if leaving user is the owner
+                    const room = await Room.findById(roomId);
+                    if (room && (room as any).ownerId?.toString() === userId) {
+                        const remainingUsers = await RoomCache.getRoomUsers(roomId);
+                        if (remainingUsers.length > 0) {
+                            const newOwnerId = remainingUsers[0];
+                            (room as any).ownerId = newOwnerId;
+                            (room as any).isOwnerless = false;
+                            await room.save();
+                            this._io.to(roomId).emit('room:owner-changed', {
+                                previousOwnerId: userId,
+                                newOwnerId,
+                            });
+                        } else {
+                            (room as any).isOwnerless = true;
+                            room.isActive = false;
+                            await room.save();
+                        }
+                    }
+                } catch (error) {
+                    logger.error(`Error in room:leave for room ${roomId}:`, error);
+                }
+            });
+
+            socket.on('room:focus-mode', async (data: { roomId: string; enabled: boolean }) => {
+                const { roomId, enabled } = data;
+                try {
+                    const room = await Room.findById(roomId);
+                    if (!room || (room as any).ownerId?.toString() !== userId) {
+                        socket.emit('room:error', { message: 'Only the room owner can toggle focus mode' });
+                        return;
+                    }
+                    (room as any).settings.focusModeEnabled = enabled;
+                    await room.save();
+                    this._io.to(roomId).emit('room:focus-mode-changed', { roomId, enabled });
+                    logger.info(`Focus mode ${enabled ? 'enabled' : 'disabled'} in room ${roomId}`);
+                } catch (error) {
+                    logger.error(`Error toggling focus mode:`, error);
+                }
+            });
+
+            socket.on('room:transfer-ownership', async (data: { roomId: string; newOwnerId: string }) => {
+                const { roomId, newOwnerId } = data;
+                try {
+                    const room = await Room.findById(roomId);
+                    if (!room || (room as any).ownerId?.toString() !== userId) {
+                        socket.emit('room:error', { message: 'Only the room owner can transfer ownership' });
+                        return;
+                    }
+                    (room as any).ownerId = newOwnerId;
+                    await room.save();
+                    this._io.to(roomId).emit('room:owner-changed', { previousOwnerId: userId, newOwnerId });
+                } catch (error) {
+                    logger.error(`Error transferring ownership:`, error);
+                }
+            });
+
+            socket.on('room:kick-user', async (data: { roomId: string; targetUserId: string }) => {
+                const { roomId, targetUserId } = data;
+                try {
+                    const room = await Room.findById(roomId);
+                    if (!room || (room as any).ownerId?.toString() !== userId) {
+                        socket.emit('room:error', { message: 'Only the room owner can kick users' });
+                        return;
+                    }
+                    this._io.to(roomId).emit('room:user-kicked', { userId: targetUserId, reason: 'Kicked by owner' });
+                } catch (error) {
+                    logger.error(`Error kicking user:`, error);
+                }
+            });
+
+            socket.on('audio:mute-toggle', (data: { roomId: string; isMuted: boolean }) => {
+                const { roomId, isMuted } = data;
+                socket.to(roomId).emit('audio:user-muted', { userId, isMuted });
+            });
+
+            // Chat send handler for room chat
+            socket.on('chat:send', async (data: { roomId: string; content: string }) => {
+                const { roomId, content } = data;
+                const message = {
+                    id: new Types.ObjectId().toString(),
+                    userId,
+                    username: socket.user?.username || 'Unknown',
+                    content,
+                    timestamp: Date.now(),
+                };
+                this._io.to(roomId).emit('chat:message', message);
+            });
+
+            // ==================== Timer Handlers ====================
+
+            const timerIntervals = new Map<string, NodeJS.Timer>();
+
+            socket.on('timer:start', async (data: { roomId: string; durationSeconds: number; mode: string }) => {
+                const { roomId, durationSeconds, mode } = data;
+                try {
+                    const room = await Room.findById(roomId);
+                    if (!room || (room as any).ownerId?.toString() !== userId) {
+                        socket.emit('room:error', { message: 'Only the room owner can control the timer' });
+                        return;
+                    }
+
+                    // Store timer state in Redis
+                    const timerState = {
+                        mode,
+                        remainingSeconds: durationSeconds,
+                        totalSeconds: durationSeconds,
+                        isRunning: true,
+                        startedAt: Date.now(),
+                    };
+
+                    await RoomCache.setRoomState(roomId, { ...(await RoomCache.getRoomState(roomId) || {}), timer: timerState });
+
+                    // Broadcast initial state
+                    this._io.to(roomId).emit('timer:sync', { timerState });
+
+                    // Clear any existing interval for this room
+                    const existingInterval = timerIntervals.get(roomId);
+                    if (existingInterval) clearInterval(existingInterval as any);
+
+                    // Start countdown
+                    const interval = setInterval(async () => {
+                        const state = await RoomCache.getRoomState(roomId);
+                        if (!state?.timer || !state.timer.isRunning) {
+                            clearInterval(interval as any);
+                            timerIntervals.delete(roomId);
+                            return;
+                        }
+
+                        state.timer.remainingSeconds -= 1;
+
+                        if (state.timer.remainingSeconds <= 0) {
+                            state.timer.isRunning = false;
+                            state.timer.remainingSeconds = 0;
+                            clearInterval(interval as any);
+                            timerIntervals.delete(roomId);
+                            this._io.to(roomId).emit('timer:complete', { completedMode: state.timer.mode });
+                        }
+
+                        await RoomCache.setRoomState(roomId, state);
+                        this._io.to(roomId).emit('timer:sync', { timerState: state.timer });
+                    }, 1000);
+
+                    timerIntervals.set(roomId, interval as any);
+                    logger.info(`Timer started in room ${roomId}: ${durationSeconds}s ${mode}`);
+                } catch (error) {
+                    logger.error(`Error starting timer:`, error);
+                }
+            });
+
+            socket.on('timer:pause', async (data: { roomId: string }) => {
+                const { roomId } = data;
+                try {
+                    const state = await RoomCache.getRoomState(roomId);
+                    if (state?.timer) {
+                        state.timer.isRunning = false;
+                        state.timer.pausedAt = Date.now();
+                        await RoomCache.setRoomState(roomId, state);
+
+                        const existingInterval = timerIntervals.get(roomId);
+                        if (existingInterval) {
+                            clearInterval(existingInterval as any);
+                            timerIntervals.delete(roomId);
+                        }
+
+                        this._io.to(roomId).emit('timer:sync', { timerState: state.timer });
+                        logger.info(`Timer paused in room ${roomId}`);
+                    }
+                } catch (error) {
+                    logger.error(`Error pausing timer:`, error);
+                }
+            });
+
+            socket.on('timer:reset', async (data: { roomId: string }) => {
+                const { roomId } = data;
+                try {
+                    const state = await RoomCache.getRoomState(roomId);
+                    if (state) {
+                        delete state.timer;
+                        await RoomCache.setRoomState(roomId, state);
+                    }
+
+                    const existingInterval = timerIntervals.get(roomId);
+                    if (existingInterval) {
+                        clearInterval(existingInterval as any);
+                        timerIntervals.delete(roomId);
+                    }
+
+                    this._io.to(roomId).emit('timer:reset', {});
+                    logger.info(`Timer reset in room ${roomId}`);
+                } catch (error) {
+                    logger.error(`Error resetting timer:`, error);
                 }
             });
 

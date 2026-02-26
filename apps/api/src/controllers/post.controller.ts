@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { Post, Like, Comment, Save, User } from '@studymate/database';
+import { Post, Like, Comment, Save, User, Notification } from '@studymate/database';
 import { FeedCache, connectRedis } from '@studymate/cache';
 import { asyncHandler, success, parsePagination } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
@@ -130,6 +130,16 @@ export class PostController {
                 await p.save(); // Triggers engagement score calc + update
                 const { FeedService } = await import('../services/feed.service');
                 await FeedService.updateEngagement(p);
+
+                // Notify post author
+                if (p.userId.toString() !== req.user!.userId) {
+                    await Notification.create({
+                        recipientId: p.userId,
+                        senderId: req.user!.userId,
+                        type: 'LIKE_POST',
+                        postId: p._id
+                    });
+                }
             }
         }
         res.json(success(null, 'Post liked'));
@@ -176,6 +186,16 @@ export class PostController {
                 await p.save();
                 const { FeedService } = await import('../services/feed.service');
                 await FeedService.updateEngagement(p);
+
+                // Notify post author
+                if (p.userId.toString() !== req.user!.userId) {
+                    await Notification.create({
+                        recipientId: p.userId,
+                        senderId: req.user!.userId,
+                        type: 'COMMENT_POST',
+                        postId: p._id
+                    });
+                }
             }
         }
         res.status(201).json(success(comment, 'Comment added'));

@@ -10,28 +10,12 @@ export const chatApi = axios.create({
     withCredentials: true,
 });
 
-// Request Interceptor: Attach Clerk session token
-let getTokenFn: (() => Promise<string | null>) | null = null;
-
-export const setClerkGetToken = (fn: () => Promise<string | null>) => {
-    getTokenFn = fn;
-};
-
-// Helper to wait until `getTokenFn` is defined
-const waitForGetTokenFn = async (maxWaitMs = 5000): Promise<(() => Promise<string | null>) | null> => {
-    const startTime = Date.now();
-    while (!getTokenFn) {
-        if (Date.now() - startTime > maxWaitMs) return null;
-        await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    return getTokenFn;
-};
+import { supabase } from './supabase';
 
 const attachToken = async (config: any) => {
-    const fn = await waitForGetTokenFn();
-    if (fn) {
-        const token = await fn();
-        console.log('[AXIOS INTERCEPTOR] URL:', config.url, 'Token obtained:', token ? (token.substring(0, 10) + '...') : 'null');
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
         if (token) {
             if (config.headers && typeof config.headers.set === 'function') {
                 config.headers.set('Authorization', `Bearer ${token}`);
@@ -39,8 +23,8 @@ const attachToken = async (config: any) => {
                 config.headers.Authorization = `Bearer ${token}`; // Fallback
             }
         }
-    } else {
-        console.warn('[AXIOS INTERCEPTOR] getTokenFn was never initialized');
+    } catch (error) {
+        console.warn('Failed to retrieve Supabase session in interceptor', error);
     }
     return config;
 };

@@ -1,248 +1,109 @@
 import { motion } from 'framer-motion';
-import { Trophy, Clock, Flame, BarChart, Download, Calendar, Zap } from 'lucide-react';
-import { analyticsData } from '../data/mockAnalytics';
+import { BarChart3, LineChart, PieChart, TrendingUp, Calendar, Download, Sparkles, Lock } from 'lucide-react';
 
 export default function AnalyticsPage() {
-    const { personalStats, weeklyDistribution, leaderboard, focusQuality } = analyticsData;
-
     return (
-        <div className="p-8 max-w-[1600px] mx-auto space-y-8">
+        <div className="p-8 max-w-[1600px] mx-auto min-h-[calc(100vh-4rem)] flex flex-col relative">
 
-            {/* Page Header */}
-            <header className="flex justify-between items-center">
+            {/* Header */}
+            <header className="flex justify-between items-center mb-8">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Leaderboard & Analytics</h1>
-                    <p className="text-slate-500 text-sm">Activity summary for March 2024</p>
+                    <h1 className="text-2xl font-bold text-slate-900">Analytics & Insights</h1>
+                    <p className="text-slate-500 text-sm mt-1">Track your progress and study patterns</p>
                 </div>
                 <div className="flex gap-4">
-                    <div className="flex items-center bg-white border border-slate-200 rounded-lg p-1 shadow-sm">
-                        <button className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md shadow-sm">Global</button>
-                        <button className="px-4 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-md">Friends</button>
-                        <button className="px-4 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-md">IIT-JEE</button>
-                    </div>
-
-                    <button className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors">
+                    <button disabled className="flex items-center gap-2 bg-white border border-slate-200 text-slate-400 px-4 py-2 rounded-xl font-medium text-sm cursor-not-allowed hidden md:flex">
                         <Calendar size={16} />
                         Last 30 Days
                     </button>
-
-                    <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20">
+                    <button disabled className="flex items-center gap-2 bg-slate-100 text-slate-400 px-4 py-2 rounded-xl font-medium text-sm cursor-not-allowed hidden md:flex">
                         <Download size={16} />
-                        Export PDF
+                        Export Report
                     </button>
                 </div>
             </header>
 
-            {/* Main Grid Layout */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            {/* Content Wrapper with Overlay */}
+            <div className="relative flex-1 rounded-3xl overflow-hidden border border-slate-200/60 bg-white/50">
 
-                {/* Left Column: Leaderboard Podium + List (4 cols) */}
-                <div className="xl:col-span-4 space-y-8">
-
-                    {/* Podium Card */}
-                    <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-5">
-                            <Trophy size={100} />
-                        </div>
-
-                        <h2 className="font-bold text-lg text-slate-800 mb-8">Top Performers</h2>
-
-                        {/* Podium Visual */}
-                        <div className="flex justify-center items-end gap-2 h-48 mb-6">
-                            {/* 2nd Place */}
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="relative">
-                                    <img src={leaderboard[1].avatar} className="w-12 h-12 rounded-full border-2 border-slate-200" />
-                                    <div className="absolute -bottom-2 -right-2 bg-slate-200 text-slate-600 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">2</div>
-                                </div>
-                                <div className="text-center">
-                                    <p className="font-bold text-xs text-slate-800">{leaderboard[1].name}</p>
-                                    <p className="text-[10px] text-blue-600 font-bold">{leaderboard[1].hours}h</p>
-                                </div>
-                                <motion.div initial={{ height: 0 }} animate={{ height: 60 }} className="w-16 bg-slate-100 rounded-t-lg" />
-                            </div>
-
-                            {/* 1st Place */}
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="relative">
-                                    <img src={leaderboard[0].avatar} className="w-16 h-16 rounded-full border-4 border-yellow-100" />
-                                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-yellow-500"><Trophy size={20} fill="currentColor" /></div>
-                                </div>
-                                <div className="text-center">
-                                    <p className="font-bold text-sm text-slate-800">{leaderboard[0].name}</p>
-                                    <p className="text-xs text-blue-600 font-bold">{leaderboard[0].hours}h</p>
-                                </div>
-                                <motion.div initial={{ height: 0 }} animate={{ height: 90 }} className="w-20 bg-yellow-50 rounded-t-lg border-t-4 border-yellow-400/20" />
-                            </div>
-
-                            {/* 3rd Place */}
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="relative">
-                                    <img src={leaderboard[2].avatar} className="w-12 h-12 rounded-full border-2 border-slate-200" />
-                                    <div className="absolute -bottom-2 -right-2 bg-orange-100 text-orange-600 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">3</div>
-                                </div>
-                                <div className="text-center">
-                                    <p className="font-bold text-xs text-slate-800">{leaderboard[2].name}</p>
-                                    <p className="text-[10px] text-blue-600 font-bold">{leaderboard[2].hours}h</p>
-                                </div>
-                                <motion.div initial={{ height: 0 }} animate={{ height: 40 }} className="w-16 bg-orange-50 rounded-t-lg" />
-                            </div>
+                {/* Blurred Background Skeleton Grid */}
+                <div className="absolute inset-0 p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 auto-rows-[160px] opacity-40 blur-[4px] pointer-events-none select-none">
+                    {/* Top Stats */}
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col justify-between">
+                        <div className="w-10 h-10 rounded-full bg-blue-100/50 flex items-center justify-center"><TrendingUp className="text-blue-400" /></div>
+                        <div><div className="h-3 w-24 bg-slate-200 rounded mb-2"></div><div className="h-8 w-16 bg-slate-200 rounded"></div></div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col justify-between">
+                        <div className="w-10 h-10 rounded-full bg-purple-100/50 flex items-center justify-center"><BarChart3 className="text-purple-400" /></div>
+                        <div><div className="h-3 w-20 bg-slate-200 rounded mb-2"></div><div className="h-8 w-24 bg-slate-200 rounded"></div></div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col justify-between md:col-span-2 xl:col-span-2">
+                        <div className="w-10 h-10 rounded-full bg-green-100/50 flex items-center justify-center"><LineChart className="text-green-400" /></div>
+                        <div className="flex items-end gap-2 h-16 mt-4">
+                            {[40, 70, 45, 90, 65, 85, 50, 100].map((h, i) => (
+                                <div key={i} className="flex-1 bg-slate-200 rounded-t-sm" style={{ height: `${h}%` }}></div>
+                            ))}
                         </div>
                     </div>
 
-                    {/* List */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                        <div className="flex justify-between p-4 border-b border-slate-50 bg-slate-50/50">
-                            <span className="text-xs font-bold text-slate-400 tracking-wider">RANK</span>
-                            <span className="text-xs font-bold text-slate-400 tracking-wider">STUDENT</span>
-                            <span className="text-xs font-bold text-slate-400 tracking-wider">HOURS</span>
+                    {/* Main Chart Area */}
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 md:col-span-2 lg:col-span-3 xl:col-span-3 row-span-2">
+                        <div className="h-4 w-48 bg-slate-200 rounded mb-8"></div>
+                        <div className="w-full h-[200px] border-b border-l border-slate-200 flex items-end justify-between px-4 pb-0 relative">
+                            {/* Fake chart lines */}
+                            <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+                                <path d="M0,80 Q25,30 50,60 T100,20 L100,100 L0,100 Z" fill="#e2e8f0" opacity="0.5" />
+                                <path d="M0,80 Q25,30 50,60 T100,20" fill="none" stroke="#cbd5e1" strokeWidth="2" />
+                            </svg>
                         </div>
-                        <div className="divide-y divide-slate-50">
-                            <div className="flex items-center justify-between p-4 bg-blue-50/50 border-l-4 border-blue-500">
-                                <span className="text-sm font-bold text-blue-600 w-6">14</span>
-                                <div className="flex items-center gap-3 flex-1">
-                                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Aryan" className="w-8 h-8 rounded-full bg-white" />
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-900">Arjun Sharma <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded ml-1">YOU</span></p>
-                                        <p className="text-[10px] text-slate-500">IIT-JEE Aspirant</p>
-                                    </div>
-                                </div>
-                                <span className="text-sm font-bold text-slate-900">88.4h</span>
-                            </div>
-                            {leaderboard.slice(3).map(user => (
-                                <div key={user.rank} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
-                                    <span className="text-sm font-medium text-slate-400 w-6">{user.rank}</span>
-                                    <div className="flex items-center gap-3 flex-1">
-                                        <img src={user.avatar} className="w-8 h-8 rounded-full bg-slate-100" />
-                                        <p className="text-sm font-medium text-slate-700">{user.name}</p>
-                                    </div>
-                                    <span className="text-sm font-bold text-slate-900">{user.hours}h</span>
-                                </div>
-                            ))}
+                    </div>
+
+                    {/* Side Pie Chart */}
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col items-center justify-center row-span-2">
+                        <div className="h-4 w-32 bg-slate-200 rounded mb-8 self-start"></div>
+                        <div className="w-40 h-40 rounded-full border-[16px] border-slate-200 border-t-slate-300 border-r-slate-300 border-b-slate-100 relative">
+                            <div className="absolute inset-0 flex items-center justify-center"><PieChart className="text-slate-300 w-8 h-8" /></div>
                         </div>
                     </div>
                 </div>
 
-                {/* Right Column: Stats + Charts (8 cols) */}
-                <div className="xl:col-span-8 space-y-8">
+                {/* Coming Soon Glass Overlay */}
+                <div className="absolute inset-0 z-10 flex items-center justify-center pb-12">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                        className="bg-white/80 backdrop-blur-xl border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-3xl p-10 md:p-14 max-w-xl w-full mx-4 text-center ring-1 ring-slate-900/5 relative overflow-hidden"
+                    >
+                        {/* Decorative glow */}
+                        <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-400/20 rounded-full blur-3xl"></div>
+                        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-purple-400/20 rounded-full blur-3xl"></div>
 
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-blue-100 transition-all">
-                            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Clock size={40} className="text-blue-600" /></div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total Hours</p>
-                            <h3 className="text-3xl font-bold text-slate-900 mb-1">{personalStats.totalHours}</h3>
-                            <p className="text-xs font-medium text-green-500 bg-green-50 inline-block px-1.5 py-0.5 rounded">{personalStats.hoursChange}</p>
-                        </div>
-
-                        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-green-100 transition-all">
-                            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Zap size={40} className="text-green-600" /></div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Sessions</p>
-                            <h3 className="text-3xl font-bold text-slate-900 mb-1">{personalStats.focusSessions}</h3>
-                            <p className="text-xs font-medium text-green-500 bg-green-50 inline-block px-1.5 py-0.5 rounded">{personalStats.sessionsChange}</p>
-                        </div>
-
-                        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-orange-100 transition-all border-b-4 border-b-orange-400">
-                            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Flame size={40} className="text-orange-600" /></div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Day Streak</p>
-                            <h3 className="text-3xl font-bold text-slate-900 mb-1">{personalStats.streak} <span className="text-sm font-normal text-slate-400">Days</span></h3>
-                        </div>
-
-                        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-purple-100 transition-all border-b-4 border-b-purple-400">
-                            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><BarChart size={40} className="text-purple-600" /></div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Percentile</p>
-                            <h3 className="text-3xl font-bold text-slate-900 mb-1">Top 5%</h3>
-                            <p className="text-xs font-medium text-purple-600">Global Rank</p>
-                        </div>
-                    </div>
-
-                    {/* Weekly Distribution Chart */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="flex justify-between items-center mb-8">
-                            <h3 className="font-bold text-slate-800">Weekly Focus Distribution</h3>
-                            <div className="flex gap-4 text-xs font-medium">
-                                <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 bg-blue-500 rounded-full"></span> YOU</div>
-                                <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 bg-slate-200 rounded-full"></span> AVERAGE</div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-between items-end h-48 px-4">
-                            {weeklyDistribution.map((day) => (
-                                <div key={day.day} className="flex flex-col items-center gap-3 w-full">
-                                    <div className="flex gap-1 items-end h-full">
-                                        <motion.div initial={{ height: 0 }} animate={{ height: `${day.average * 10}%` }} className="w-3 bg-slate-100 rounded-t-md" />
-                                        <motion.div initial={{ height: 0 }} animate={{ height: `${day.yours * 10}%` }} className="w-3 bg-blue-500 rounded-t-md shadow-lg shadow-blue-500/20" />
-                                    </div>
-                                    <span className="text-xs font-medium text-slate-400">{day.day}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Bottom Row: Heatmap + Scores */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Heatmap (Simplified) */}
-                        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="font-bold text-slate-800">Consistency Heatmap</h3>
-                                <span className="text-xs text-slate-400">Less ■ ■ ■ ■ ■ More</span>
-                            </div>
-                            <div className="flex gap-1 flex-wrap">
-                                {/* Generating grid of squares */}
-                                {Array.from({ length: 42 }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className={`w-6 h-6 rounded-sm ${Math.random() > 0.7 ? 'bg-blue-500' :
-                                                Math.random() > 0.5 ? 'bg-blue-300' :
-                                                    Math.random() > 0.3 ? 'bg-blue-100' : 'bg-slate-50'
-                                            }`}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Scores & Focus Quality */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center items-center">
-                                <div className="relative w-24 h-24 flex items-center justify-center">
-                                    <svg className="w-full h-full transform -rotate-90">
-                                        <circle cx="48" cy="48" r="40" className="stroke-slate-100" strokeWidth="8" fill="none" />
-                                        <circle cx="48" cy="48" r="40" className="stroke-blue-500" strokeWidth="8" fill="none" strokeDasharray="251.2" strokeDashoffset={251.2 * (1 - focusQuality.score / 100)} strokeLinecap="round" />
-                                    </svg>
-                                    <span className="absolute text-2xl font-bold text-slate-900">{focusQuality.score}</span>
-                                </div>
-                                <p className="font-bold text-slate-800 mt-2">Study Score</p>
-                                <p className="text-xs text-green-500 font-medium">Excellent</p>
+                        <div className="relative z-10 flex flex-col items-center">
+                            <div className="w-20 h-20 bg-linear-to-tr from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-xl shadow-blue-500/20 ring-4 ring-white">
+                                <Sparkles size={36} strokeWidth={1.5} />
                             </div>
 
-                            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center gap-4">
-                                <h3 className="font-bold text-slate-800 text-sm">Focus Quality</h3>
+                            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
+                                Deep Insights <br />
+                                <span className="text-transparent bg-clip-text bg-linear-to-r from-blue-600 to-purple-600">
+                                    Coming Soon
+                                </span>
+                            </h2>
 
-                                <div>
-                                    <div className="flex justify-between text-xs mb-1">
-                                        <span className="text-slate-500">Deep Work</span>
-                                        <span className="font-bold text-blue-600">{focusQuality.deepWork}%</span>
-                                    </div>
-                                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className="h-full bg-blue-600 w-[72%] rounded-full"></div>
-                                    </div>
-                                </div>
+                            <p className="text-slate-500 text-lg mb-8 max-w-sm leading-relaxed">
+                                We're cooking up powerful analytics to help you understand your study patterns, track focus quality, and crush your goals.
+                            </p>
 
-                                <div>
-                                    <div className="flex justify-between text-xs mb-1">
-                                        <span className="text-slate-500">Revision</span>
-                                        <span className="font-bold text-purple-600">{focusQuality.revision}%</span>
-                                    </div>
-                                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className="h-full bg-purple-500 w-[28%] rounded-full"></div>
-                                    </div>
-                                </div>
+                            <div className="inline-flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-full font-medium text-sm shadow-md hover:scale-105 transition-transform cursor-default">
+                                <Lock size={16} className="text-slate-400" />
+                                Currently in Development
                             </div>
                         </div>
-                    </div>
-
+                    </motion.div>
                 </div>
             </div>
+
         </div>
     );
 }

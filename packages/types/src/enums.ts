@@ -60,5 +60,25 @@ export enum JobType {
     GENERATE_WEEKLY_REPORT = 'GENERATE_WEEKLY_REPORT',
     GENERATE_THUMBNAIL = 'GENERATE_THUMBNAIL',
     COMPRESS_IMAGE = 'COMPRESS_IMAGE',
-    SCAN_FOR_MALWARE = 'SCAN_FOR_MALWARE',
+}
+
+export enum RoomRole {
+    OWNER = 'OWNER',
+    MEMBER = 'MEMBER',
+}
+
+export enum AudioState {
+    CONNECTED = 'CONNECTED',
+    MUTED = 'MUTED',
+    DISCONNECTED = 'DISCONNECTED',
+}
+
+export enum RoomMode {
+    NORMAL = 'NORMAL',
+    FOCUS = 'FOCUS',
+}
+
+export enum RoomCategory {
+    STUDY = 'STUDY',
+    QUIZ = 'QUIZ',
 }

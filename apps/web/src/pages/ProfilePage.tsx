@@ -6,14 +6,14 @@ import { useUserStore } from '../stores/useUserStore';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/axios';
-import { useClerk } from '@clerk/clerk-react';
+import { useAuth } from '../contexts/AuthContext';
 import PostCard, { Post } from '../components/PostCard'; // Keep for Grid view if needed, or replace.
 import FeedPost from '../components/FeedPost';
 
 export default function ProfilePage() {
     const { user, updateUser, logout } = useUserStore();
     const navigate = useNavigate();
-    const { signOut } = useClerk();
+    const { signOut } = useAuth();
 
     const [loading, setLoading] = useState(true);
 
@@ -199,50 +199,7 @@ export default function ProfilePage() {
                         </div>
                     </div>
 
-                    {/* Stats Overview */}
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                        <div className="p-4 border-b border-slate-100">
-                            <h2 className="font-bold text-slate-800">Study Stats</h2>
-                        </div>
-                        <div className="p-6 space-y-6">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center">
-                                        <span className="text-xl">🔥</span>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">Current Streak</p>
-                                        <p className="text-lg font-bold text-slate-900">{(user as any).currentStreak || 0} Days</p>
-                                    </div>
-                                </div>
-                                {(user as any).currentStreak > 0 && <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded">Active</span>}
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
-                                        <span className="text-xl">📚</span>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Studied</p>
-                                        <p className="text-lg font-bold text-slate-900">{(user as any).totalStudyHours || 0} Hours</p>
-                                    </div>
-                                </div>
-                            </div>
-                            {(user as any).contributorBadge && (
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
-                                            <span className="text-xl">🏆</span>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm text-slate-500">Badge</p>
-                                            <p className="text-lg font-bold text-slate-900">{(user as any).contributorBadge}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+
                 </aside>
 
                 {/* Right Column: Content Grid */}

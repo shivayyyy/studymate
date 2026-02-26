@@ -4,7 +4,6 @@ import { createClient } from 'redis';
 import { createLogger } from '@studymate/logger';
 import { authMiddleware } from './middleware/auth.middleware';
 import { registerRoomHandlers } from './handlers/room.handler';
-import { registerTimerHandlers } from './handlers/timer.handler';
 import { registerPresenceHandlers } from './handlers/presence.handler';
 import { registerChatHandlers } from './handlers/chat.handler';
 
@@ -45,7 +44,6 @@ io.on('connection', (socket) => {
     logger.info(`User connected: ${socket.data.userId} (socket: ${socket.id})`);
 
     registerRoomHandlers(io, socket);
-    registerTimerHandlers(io, socket);
     registerPresenceHandlers(io, socket);
     registerChatHandlers(io, socket);
 

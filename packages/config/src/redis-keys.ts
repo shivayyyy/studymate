@@ -11,6 +11,7 @@ export const RedisKeys = {
     roomOccupancy: (roomId: string) => `room:${roomId}:occupancy`,
     roomUsers: (roomId: string) => `room:${roomId}:users`,
     roomTimer: (roomId: string) => `room:${roomId}:timer`,
+    roomUserMicTime: (roomId: string, userId: string) => `room:${roomId}:mictime:${userId}`,
 
     // User data
     userProfile: (userId: string) => `user:${userId}:profile`,

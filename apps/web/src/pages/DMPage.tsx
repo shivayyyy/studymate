@@ -7,7 +7,7 @@ import { ChatService } from '../services/chat.service';
 import { User, useUserStore } from '../stores/useUserStore';
 import { useChatStore } from '../stores/useChatStore';
 import { useFriendStore } from '../stores/useFriendStore';
-import { FriendRequestsList } from '../components/FriendRequestsList';
+import { NotificationsList } from '../components/NotificationsList';
 import { UserSearchPopover } from '../components/UserSearchPopover';
 import { format } from 'date-fns';
 
@@ -193,7 +193,7 @@ export default function DMPage() {
 
                 <div className="flex-1 overflow-y-auto">
                     {sidebarTab === 'requests' ? (
-                        <FriendRequestsList />
+                        <NotificationsList />
                     ) : (
                         <div className="divide-y divide-slate-50">
                             {conversations.length === 0 ? (

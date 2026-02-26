@@ -10,7 +10,7 @@ export interface IUserDocument extends Document {
     subjects: string[];
     targetYear?: number;
     googleId?: string;
-    clerkId?: string;
+    supabaseId?: string;
     bio?: string;
     dailyStudyGoal: number; // in hours
     timerPreference: {
@@ -69,7 +69,7 @@ const UserSchema = new Schema<IUserDocument>(
         isVerified: { type: Boolean, default: false },
         isActive: { type: Boolean, default: true },
         googleId: { type: String, unique: true, sparse: true },
-        clerkId: { type: String, unique: true, sparse: true },
+        supabaseId: { type: String, unique: true, sparse: true },
     },
     { timestamps: true },
 );

@@ -9,3 +9,5 @@ export { Follow, type IFollowDocument } from './Follow.model';
 export { Conversation, type IConversationDocument } from './Conversation.model';
 export { Message, type IMessageDocument, MessageStatus, MessageType } from './Message.model';
 export { FriendRequest, type IFriendRequestDocument, FriendRequestStatus } from './FriendRequest.model';
+export { RoomMessage, type IRoomMessageDocument } from './RoomMessage.model';
+export { Notification, type INotificationDocument } from './Notification.model';

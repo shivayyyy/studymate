@@ -7,7 +7,6 @@ import { connectDB } from '@studymate/database';
 import { connectRedis } from '@studymate/cache';
 import { createLogger } from '@studymate/logger';
 import { API_PREFIX } from '@studymate/config';
-import { clerkMiddleware } from '@clerk/express';
 import { SocketService } from './services/SocketService';
 import { chatRouter } from './routes/chat.routes';
 import dotenv from 'dotenv';
@@ -25,9 +24,6 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
-app.use(clerkMiddleware({
-    authorizedParties: ['http://localhost:3000']
-}));
 
 app.use((req, res, next) => {
     logger.info(`🚨 Incoming Request to Chat Service: ${req.method} ${req.originalUrl}`);

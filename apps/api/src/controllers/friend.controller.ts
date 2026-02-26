@@ -1,6 +1,6 @@
 
 import type { Request, Response } from 'express';
-import { User, FriendRequest, FriendRequestStatus, Follow } from '@studymate/database';
+import { User, FriendRequest, FriendRequestStatus, Follow, Notification } from '@studymate/database';
 import { asyncHandler, success, parsePagination } from '@studymate/utils';
 import { AppError } from '../middleware/error-handler';
 import { RedisKeys } from '@studymate/config';
@@ -60,6 +60,13 @@ export class FriendController {
         // In Phase 4 we will ensure the socket server subscribes to this
         // await CacheManager.publish('friend_events', { type: 'friend_request', payload: { ... } });
 
+        // Create universal notification
+        await Notification.create({
+            recipientId: receiverId,
+            senderId,
+            type: 'FRIEND_REQUEST',
+        });
+
         res.status(201).json(success(request, 'Friend request sent'));
     });
 
@@ -99,6 +106,13 @@ export class FriendController {
         // Update counts
         await User.findByIdAndUpdate(request.senderId, { $inc: { followingCount: 1, followersCount: 1 } });
         await User.findByIdAndUpdate(request.receiverId, { $inc: { followingCount: 1, followersCount: 1 } });
+
+        // Notify sender that their request was accepted
+        await Notification.create({
+            recipientId: request.senderId,
+            senderId: request.receiverId,
+            type: 'FRIEND_ACCEPT',
+        });
 
         res.json(success(null, 'Friend request accepted'));
     });

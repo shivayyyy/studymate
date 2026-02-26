@@ -9,7 +9,6 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
-        "@clerk/express": "^1.7.72",
         "@studymate/analytics": "workspace:*",
         "@studymate/auth": "workspace:*",
         "@studymate/cache": "workspace:*",
@@ -22,6 +21,7 @@
         "@studymate/types": "workspace:*",
         "@studymate/utils": "workspace:*",
         "@studymate/validation": "workspace:*",
+        "@supabase/supabase-js": "^2.97.0",
         "@types/bcryptjs": "^3.0.0",
         "bcryptjs": "^3.0.3",
         "compression": "^1.7.5",
@@ -31,6 +31,7 @@
         "express": "^4.21.2",
         "express-rate-limit": "^7.5.0",
         "helmet": "^8.0.0",
+        "livekit-server-sdk": "^2.15.0",
         "morgan": "^1.10.0",
         "multer": "^1.4.5-lts.1"
     },
