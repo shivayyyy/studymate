@@ -11,6 +11,7 @@ import { connectRedis } from '@studymate/cache';
 import { createLogger } from '@studymate/logger';
 import { API_PREFIX, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS } from '@studymate/config';
 import http from 'http';
+import { clerkMiddleware } from '@clerk/express';
 
 
 import { authRouter } from './routes/auth.routes';
@@ -57,6 +58,7 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(clerkMiddleware());
 app.use(morgan('dev'));
 
 // Rate limiting

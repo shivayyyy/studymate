@@ -1,11 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { User } from '@studymate/database';
-import { createClient } from '@supabase/supabase-js';
+import { createClerkClient, getAuth } from '@clerk/express';
 
-const supabase = createClient(
-    process.env.SUPABASE_URL || '',
-    process.env.SUPABASE_ANON_KEY || ''
-);
+const clerkClient = createClerkClient({
+    secretKey: process.env.CLERK_SECRET_KEY,
+    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+});
 
 declare global {
     namespace Express {
@@ -24,30 +24,21 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         console.log('--- AUTH MIDDLEWARE TRIGGERED ---');
         console.log('Method:', req.method);
         console.log('Path:', req.path);
-        console.log('Headers (Authorization):', req.headers.authorization);
 
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            console.log('=> FAILED: Missing or malformed Authorization Bearer token');
-            res.status(401).json({ success: false, message: 'Authentication required' });
-            return;
-        }
+        const auth = getAuth(req);
 
-        const token = authHeader.split(' ')[1];
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
-
-        if (authError || !authUser) {
-            console.log('=> FAILED: Supabase user verification failed:', authError?.message);
+        if (!auth || !auth.userId) {
+            console.log('=> FAILED: Invalid or missing Clerk user identity');
             res.status(401).json({ success: false, message: 'Invalid or expired token' });
             return;
         }
 
-        const supabaseUserId = authUser.id;
+        const clerkId = auth.userId;
 
-        const user = await User.findOne({ supabaseId: supabaseUserId }).select('-passwordHash');
+        const user = await User.findOne({ clerkId }).select('-passwordHash');
 
         if (!user) {
-            console.log('=> FAILED: User not found in DB with supabaseId:', supabaseUserId);
+            console.log('=> FAILED: User not found in DB with clerkId:', clerkId);
             res.status(401).json({ success: false, message: 'User not found. Please complete profile setup.' });
             return;
         }

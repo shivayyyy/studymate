@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { User } from '@studymate/database';
-import { supabase } from '../lib/supabase';
+import { clerkClient } from '../lib/clerk';
+import { getAuth } from '@clerk/express';
 
 declare global {
     namespace Express {
@@ -9,6 +10,7 @@ declare global {
                 userId: string;
                 email: string;
                 username: string;
+                clerkId: string;
             };
         }
     }
@@ -16,28 +18,22 @@ declare global {
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        const auth = getAuth(req);
+
+        if (!auth || !auth.userId) {
             res.status(401).json({ success: false, message: 'Authentication required' });
             return;
         }
 
-        const token = authHeader.split(' ')[1];
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+        const clerkId = auth.userId;
+        console.log(`[AUTH-DEBUG] Middleware checking clerkId: ${clerkId}`);
 
-        if (authError || !authUser) {
-            res.status(401).json({ success: false, message: 'Invalid or expired token' });
-            return;
-        }
-
-        const supabaseId = authUser.id;
-
-        let user = await User.findOne({ supabaseId }).select('-passwordHash');
+        let user = await User.findOne({ clerkId }).select('-passwordHash');
 
         if (!user) {
-            // Auto-provision: if no user exists with this supabaseId, this is a new Supabase user
+            // Auto-provision: if no user exists with this clerkId, this is a new user
             // We'll return 401 for now — the /auth/sync route will handle user creation
-            res.status(401).json({ success: false, message: 'User not found. Please complete profile setup.' });
+            res.status(401).json({ success: false, message: 'User not found. Please complete profile setup by calling /sync.' });
             return;
         }
 
@@ -50,6 +46,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
             userId: user._id.toString(),
             email: user.email,
             username: user.username,
+            clerkId: clerkId,
         };
         next();
     } catch (error) {
@@ -60,20 +57,17 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 export const optionalAuthenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            const token = authHeader.split(' ')[1];
-            const { data: { user: authUser } } = await supabase.auth.getUser(token);
-
-            if (authUser) {
-                const user = await User.findOne({ supabaseId: authUser.id }).select('-passwordHash');
-                if (user && user.isActive) {
-                    req.user = {
-                        userId: user._id.toString(),
-                        email: user.email,
-                        username: user.username,
-                    };
-                }
+        const auth = getAuth(req);
+        
+        if (auth && auth.userId) {
+            const user = await User.findOne({ clerkId: auth.userId }).select('-passwordHash');
+            if (user && user.isActive) {
+                req.user = {
+                    userId: user._id.toString(),
+                    email: user.email,
+                    username: user.username,
+                    clerkId: auth.userId,
+                };
             }
         }
     } catch (error) {

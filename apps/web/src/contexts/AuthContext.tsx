@@ -1,10 +1,9 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import React, { createContext, useContext } from 'react';
+import { useUser, useAuth as useClerkAuth, useClerk } from '@clerk/clerk-react';
 
 interface AuthContextType {
-    session: Session | null;
-    user: User | null;
+    session: any | null;
+    user: any | null;
     loading: boolean;
     signOut: () => Promise<void>;
 }
@@ -13,41 +12,35 @@ const AuthContext = createContext<AuthContextType>({
     session: null,
     user: null,
     loading: true,
-    signOut: async () => { },
+    signOut: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-    const [session, setSession] = useState<Session | null>(null);
-    const [user, setUser] = useState<User | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { isLoaded: isUserLoaded, user } = useUser();
+    const { isLoaded: isAuthLoaded, sessionId } = useClerkAuth();
+    const { signOut: clerkSignOut } = useClerk();
 
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            setLoading(false);
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            setLoading(false);
-        });
-
-        return () => subscription.unsubscribe();
-    }, []);
+    const loading = !isUserLoaded || !isAuthLoaded;
 
     const signOut = async () => {
-        await supabase.auth.signOut();
+        await clerkSignOut();
     };
 
+    // Supabase returns user.email and user.id. Clerk returns user.id and user.primaryEmailAddress.
+    const proxyUser = user ? { 
+        ...user, 
+        id: user.id, 
+        email: user.primaryEmailAddress?.emailAddress 
+    } : null;
+
+    // Construct a mock session to maintain compatibility
+    const session = sessionId ? { access_token: sessionId, user: proxyUser } : null;
+
     return (
-        <AuthContext.Provider value={{ session, user, loading, signOut }}>
-            {!loading && children}
+        <AuthContext.Provider value={{ session, user: proxyUser, loading, signOut }}>
+            {children}
         </AuthContext.Provider>
     );
 };
 
-export const useAuth = () => {
-    return useContext(AuthContext);
-};
+export const useAuth = () => useContext(AuthContext);

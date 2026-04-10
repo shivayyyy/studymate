@@ -1,63 +1,57 @@
 import { Router, Request, Response } from 'express';
-import { validate } from '../middleware/validate.middleware';
-import { registerSchema, loginSchema, refreshTokenSchema } from '@studymate/validation';
-import { AuthController } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { User } from '@studymate/database';
+import { clerkClient } from '../lib/clerk';
+import { generateAccessToken } from '@studymate/auth';
+
+import { getAuth } from '@clerk/express';
 
 const router = Router();
 
-// Supabase sync endpoint: creates or finds a user in our DB based on Supabase identity
+// Clerk sync endpoint: creates or finds a user in our DB based on Clerk identity
 router.post('/sync', async (req: Request, res: Response) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            res.status(401).json({ success: false, message: 'Not authenticated with Supabase' });
+        const auth = getAuth(req);
+
+        if (!auth || !auth.userId) {
+            res.status(401).json({ success: false, message: 'Not authenticated with Clerk' });
             return;
         }
 
-        const token = authHeader.split(' ')[1];
+        const clerkId = auth.userId;
+        console.log(`[AUTH-DEBUG] Sync checking clerkId: ${clerkId}`);
 
-        // Use the admin client to verify and fetch user info securely
-        // We import the same client we created for middleware.
-        const { supabase } = await import('../lib/supabase');
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
-
-        if (authError || !authUser) {
-            res.status(401).json({ success: false, message: 'Invalid or expired token' });
-            return;
-        }
-
-        const supabaseUserId = authUser.id;
-
-        // 1. Check if user already exists in our DB by Supabase ID
-        const existingUserById = await User.findOne({ supabaseId: supabaseUserId }).select('-passwordHash');
+        // 1. Check if user already exists in our DB by Clerk ID
+        const existingUserById = await User.findOne({ clerkId }).select('-passwordHash');
 
         if (existingUserById) {
             res.json({ success: true, data: existingUserById, message: 'User found' });
             return;
         }
 
-        // 2. Extract email and basic info from JWT claims/user object
-        const email = authUser.email;
-        // User metadata from OAuth like Google might contain name/avatar
-        const fullName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'StudyMate User';
-        const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture || undefined;
-
-        if (!email) {
-            res.status(400).json({ success: false, message: 'No email found in Supabase profile' });
+        // 2. Extract user info from Clerk backend
+        const clerkUser = await clerkClient.users.getUser(clerkId);
+        
+        let email = '';
+        if (clerkUser.emailAddresses && clerkUser.emailAddresses.length > 0) {
+            email = clerkUser.emailAddresses[0].emailAddress;
+        } else {
+            res.status(400).json({ success: false, message: 'No email found in Clerk profile' });
             return;
         }
 
-        // 3. Check if user exists by email (migrating from old auth system or duplicate check)
+        const fullName = clerkUser.fullName || clerkUser.firstName || 'StudyMate User';
+        const avatarUrl = clerkUser.imageUrl || clerkUser.hasImage ? clerkUser.imageUrl : undefined;
+
+        // 3. Check if user exists by email (to support migrating from previous system)
         const existingUserByEmail = await User.findOne({ email }).select('-passwordHash');
 
         if (existingUserByEmail) {
-            // Link existing user to Supabase
-            existingUserByEmail.supabaseId = supabaseUserId;
+            // Link existing user to Clerk
+            existingUserByEmail.set('clerkId', clerkId);
             if (avatarUrl && !existingUserByEmail.profilePicture) existingUserByEmail.profilePicture = avatarUrl;
             await existingUserByEmail.save();
-            res.json({ success: true, data: existingUserByEmail, message: 'User linked to Supabase' });
+            res.json({ success: true, data: existingUserByEmail, message: 'User linked to Clerk' });
             return;
         }
 
@@ -67,9 +61,9 @@ router.post('/sync', async (req: Request, res: Response) => {
             email,
             username,
             fullName,
-            supabaseId: supabaseUserId,
+            clerkId,
             profilePicture: avatarUrl,
-            isVerified: true, // They verified email via provider usually.
+            isVerified: true, // Google login auto-verifies
         });
 
         res.status(201).json({ success: true, data: newUser, message: 'User created' });
@@ -79,12 +73,56 @@ router.post('/sync', async (req: Request, res: Response) => {
     }
 });
 
-router.get('/me', authenticate, AuthController.me);
+// Since ONLY Google social auth is used, custom register/login/refresh are removed.
 
-router.post('/register', validate(registerSchema), AuthController.register);
-router.post('/login', validate(loginSchema), AuthController.login);
-router.post('/refresh', validate(refreshTokenSchema), AuthController.refreshToken);
-router.post('/logout', AuthController.logout);
-router.get('/socket-token', authenticate, AuthController.socketToken);
+// Optional method to get the current loaded user from middleware
+router.get('/me', authenticate, async (req: Request, res: Response) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ success: false, message: 'Not authenticated' });
+            return;
+        }
+        res.json({ success: true, data: req.user });
+    } catch (error) {
+         res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+router.get('/socket-token', authenticate, (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ success: false, message: 'Not authenticated' });
+            return;
+        }
+
+        const token = generateAccessToken({
+            userId: req.user.userId,
+            email: req.user.email,
+            username: req.user.username,
+        });
+
+        res.json({ success: true, data: { token } });
+    } catch (e) {
+        console.error('Socket token generation error:', e);
+        res.status(500).json({ success: false, message: 'Failed to generate token' });
+    }
+});
+
+router.get('/debug-user/:clerkId', async (req, res) => {
+    try {
+        const clerkId = req.params.clerkId;
+        const userById = await User.findOne({ clerkId });
+        const allUsers = await User.find({}).limit(5).select('email username clerkId');
+        res.json({ 
+            success: true, 
+            queriedClerkId: clerkId, 
+            foundExact: !!userById,
+            userById,
+            allUsers
+        });
+    } catch (e) {
+        res.json({ success: false, error: (e as Error).message });
+    }
+});
 
 export { router as authRouter };

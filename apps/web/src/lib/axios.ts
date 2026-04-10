@@ -10,21 +10,23 @@ export const chatApi = axios.create({
     withCredentials: true,
 });
 
-import { supabase } from './supabase';
-
 const attachToken = async (config: any) => {
     try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (token) {
-            if (config.headers && typeof config.headers.set === 'function') {
-                config.headers.set('Authorization', `Bearer ${token}`);
-            } else {
-                config.headers.Authorization = `Bearer ${token}`; // Fallback
+        // We retrieve the active token securely from the globally exposed Clerk session
+        // @ts-ignore
+        if (window.Clerk && window.Clerk.session) {
+            // @ts-ignore
+            const token = await window.Clerk.session.getToken();
+            if (token) {
+                if (config.headers && typeof config.headers.set === 'function') {
+                    config.headers.set('Authorization', `Bearer ${token}`);
+                } else {
+                    config.headers.Authorization = `Bearer ${token}`; // Fallback
+                }
             }
         }
     } catch (error) {
-        console.warn('Failed to retrieve Supabase session in interceptor', error);
+        console.warn('Failed to retrieve Clerk session token in interceptor', error);
     }
     return config;
 };
